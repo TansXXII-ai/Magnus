@@ -46,7 +46,7 @@ except ImportError as e:
 # Title
 st.title("🤖 Knowledge Base Chatbot")
 
-# Debug section
+# Debug section (keep this in main area since it's collapsible)
 with st.expander("🔍 Debug Information"):
     st.write("🐍 Python version:", sys.version)
     st.write("🤖 Azure OpenAI Status:", openai_status)
@@ -60,21 +60,8 @@ with st.expander("🔍 Debug Information"):
         st.write(f"  • Endpoint: {'✅ Set' if os.getenv('AZURE_OPENAI_ENDPOINT') else '❌ Missing'}")
         st.write(f"  • Deployment: {os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'magroupAI')}")
 
-# Show main status
-if AZURE_OPENAI_AVAILABLE:
-    st.success("✅ Using Azure OpenAI")
-else:
-    st.error("❌ Azure OpenAI library is not available")
-
-# Show document support status
-doc_support = []
-if PDF_AVAILABLE:
-    doc_support.append("PDF")
-if DOCX_AVAILABLE:
-    doc_support.append("DOCX")
-doc_support.append("TXT")
-
-st.info(f"📄 **Document Support:** {', '.join(doc_support)} files")
+# Clean main area - just show essential info
+st.markdown("---")
 
 # Ensure knowledge_base directory exists
 os.makedirs("knowledge_base", exist_ok=True)
@@ -177,6 +164,27 @@ knowledge_base = load_knowledge_base()
 
 # Sidebar for knowledge base info and admin panel
 with st.sidebar:
+    # Status section at top of sidebar
+    st.header("📊 Status")
+    
+    # Show AI status
+    if AZURE_OPENAI_AVAILABLE:
+        st.success("✅ Azure OpenAI Connected")
+    else:
+        st.error("❌ Azure OpenAI Unavailable")
+    
+    # Show document support status
+    doc_support = []
+    if PDF_AVAILABLE:
+        doc_support.append("PDF")
+    if DOCX_AVAILABLE:
+        doc_support.append("DOCX")
+    doc_support.append("TXT")
+    
+    st.info(f"📄 **Supported:** {', '.join(doc_support)}")
+    
+    st.divider()
+    
     st.header("📚 Knowledge Base")
     
     if knowledge_base:
@@ -190,13 +198,8 @@ with st.sidebar:
                     preview_text = doc['content'][:300] + "..." if len(doc['content']) > 300 else doc['content']
                     st.text_area("Content preview:", preview_text, height=100, disabled=True, key=f"preview_text_{idx}")
     else:
-        st.info("📁 No documents found in knowledge base")
-        st.markdown("""
-        **To add documents:**
-        1. Use the Admin Panel below
-        2. Upload files or paste content manually
-        3. Documents will appear immediately
-        """)
+        st.warning("⚠️ Knowledge base is empty")
+        st.info("Use the Admin Panel below to add documents")
     
     st.divider()
     
@@ -222,11 +225,11 @@ with st.sidebar:
                 allowed_types.append('docx')
             
             uploaded_files = st.file_uploader(
-                f"Upload documents ({', '.join(allowed_types.upper())}):",
+                f"Upload documents ({', '.join(t.upper() for t in allowed_types)}):",
                 type=allowed_types,
                 accept_multiple_files=True,
                 key="document_uploader",
-                help=f"Supported formats: {', '.join(allowed_types.upper())}"
+                help=f"Supported formats: {', '.join(t.upper() for t in allowed_types)}"
             )
             
             # Manual text input option
@@ -397,9 +400,15 @@ Please provide helpful, accurate responses."""
                         placeholder.markdown(error_msg)
                     elif stream:
                         try:
-                            # Stream the response
+                            # Stream the response with better error handling
                             for chunk in stream:
-                                if chunk.choices[0].delta.content is not None:
+                                # Check if chunk has choices and content
+                                if (hasattr(chunk, 'choices') and 
+                                    len(chunk.choices) > 0 and 
+                                    hasattr(chunk.choices[0], 'delta') and
+                                    hasattr(chunk.choices[0].delta, 'content') and
+                                    chunk.choices[0].delta.content is not None):
+                                    
                                     delta = chunk.choices[0].delta.content
                                     full_response += delta
                                     placeholder.markdown(full_response + "▌")
@@ -422,12 +431,7 @@ Please provide helpful, accurate responses."""
             with st.chat_message("assistant"):
                 st.error(f"❌ Unexpected error: {str(e)}")
 
-# Information panel
-if not knowledge_base:
-    st.warning("⚠️ **Knowledge base is empty.** Use the Admin Panel in the sidebar to add your documents.")
-    st.info(f"💡 **Supported formats:** {', '.join(['TXT'] + (['PDF'] if PDF_AVAILABLE else []) + (['DOCX'] if DOCX_AVAILABLE else []))}")
-else:
-    st.info(f"💡 **I have access to {len(knowledge_base)} documents** and can answer questions about them!")
+# Information panel (remove - status now in sidebar)
 
 # Footer
 st.markdown("---")
