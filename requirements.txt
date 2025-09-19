@@ -1,3 +1,5 @@
 streamlit
 openai
 dropbox
+pypdf
+python-docx
