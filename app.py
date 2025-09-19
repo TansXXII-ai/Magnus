@@ -24,6 +24,26 @@ try:
 except ImportError:
     DROPBOX_AVAILABLE = False
 
+# Import document processing libraries
+PDF_AVAILABLE = False
+DOCX_AVAILABLE = False
+
+try:
+    import pypdf
+    PDF_AVAILABLE = True
+except ImportError:
+    try:
+        import PyPDF2 as pypdf
+        PDF_AVAILABLE = True
+    except ImportError:
+        pass
+
+try:
+    from docx import Document
+    DOCX_AVAILABLE = True
+except ImportError:
+    pass
+
 # Title
 st.title("🤖 Knowledge Base Chatbot")
 
@@ -50,9 +70,11 @@ class DropboxConnector:
             
             for entry in result.entries:
                 if isinstance(entry, dropbox.files.FileMetadata):
-                    # Only process text files for now (can extend later)
-                    if entry.name.lower().endswith(('.txt', '.md', '.csv')):
-                        content = self.get_file_content(entry.path_lower)
+                    # Process multiple file types
+                    file_extension = entry.name.lower().split('.')[-1]
+                    
+                    if file_extension in ['txt', 'md', 'csv', 'pdf', 'docx']:
+                        content = self.get_file_content(entry.path_lower, file_extension)
                         if content:
                             documents.append({
                                 'name': entry.name,
@@ -60,7 +82,8 @@ class DropboxConnector:
                                 'source': 'dropbox',
                                 'modified': entry.server_modified.isoformat() if entry.server_modified else '',
                                 'size': entry.size,
-                                'path': entry.path_lower
+                                'path': entry.path_lower,
+                                'type': file_extension
                             })
             
             return documents
@@ -75,12 +98,57 @@ class DropboxConnector:
             st.error(f"❌ Error fetching Dropbox documents: {str(e)}")
             return []
     
-    def get_file_content(self, file_path):
-        """Get content of a specific file"""
+    def get_file_content(self, file_path, file_extension):
+        """Get content of a specific file based on its type"""
         try:
             _, response = self.dbx.files_download(file_path)
-            content = response.content.decode('utf-8')
-            return content
+            
+            if file_extension in ['txt', 'md', 'csv']:
+                # Text files
+                content = response.content.decode('utf-8')
+                return content
+            
+            elif file_extension == 'pdf' and PDF_AVAILABLE:
+                # PDF files
+                import io
+                pdf_file = io.BytesIO(response.content)
+                
+                if hasattr(pypdf, 'PdfReader'):
+                    pdf_reader = pypdf.PdfReader(pdf_file)
+                else:
+                    pdf_reader = pypdf.PdfFileReader(pdf_file)
+                
+                text_content = ""
+                for page in pdf_reader.pages:
+                    text_content += page.extract_text() + "\n"
+                
+                return text_content.strip()
+            
+            elif file_extension == 'docx' and DOCX_AVAILABLE:
+                # DOCX files
+                import io
+                docx_file = io.BytesIO(response.content)
+                doc = Document(docx_file)
+                
+                text_content = ""
+                for paragraph in doc.paragraphs:
+                    text_content += paragraph.text + "\n"
+                
+                return text_content.strip()
+            
+            else:
+                # Unsupported file type or missing library
+                missing_libs = []
+                if file_extension == 'pdf' and not PDF_AVAILABLE:
+                    missing_libs.append("pypdf")
+                if file_extension == 'docx' and not DOCX_AVAILABLE:
+                    missing_libs.append("python-docx")
+                
+                if missing_libs:
+                    return f"Cannot process {file_extension.upper()} files. Missing libraries: {', '.join(missing_libs)}"
+                else:
+                    return f"Unsupported file type: {file_extension}"
+                    
         except UnicodeDecodeError:
             return f"File {file_path} contains binary data - cannot display as text"
         except Exception as e:
