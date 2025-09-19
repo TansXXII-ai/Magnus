@@ -2,7 +2,6 @@ import os
 import json
 import streamlit as st
 from datetime import datetime
-from docx import Document
 import glob
 
 # Try importing OpenAI with both old and new versions
@@ -29,8 +28,8 @@ if USE_NEW_OPENAI:
 else:
     st.info("ℹ️ Using OpenAI v0.x (legacy version)")
 
-# Temporary notice about PDF support
-st.info("📝 **Note:** Currently supports TXT and DOCX files. PDF support will be added once the core app is stable.")
+# Notice about file support
+st.info("📝 **Simple & Reliable:** Currently supports plain text files (.txt) and manual content input for maximum compatibility.")
 
 # Ensure knowledge_base directory exists
 os.makedirs("knowledge_base", exist_ok=True)
@@ -45,10 +44,9 @@ def load_knowledge_base():
     if not os.path.exists(knowledge_base_path):
         return []
     
-    # Supported file types (PDF support temporarily disabled)
+    # Supported file types (only plain text for now)
     file_patterns = [
-        f"{knowledge_base_path}/*.txt",
-        f"{knowledge_base_path}/*.docx"
+        f"{knowledge_base_path}/*.txt"
     ]
     
     for pattern in file_patterns:
@@ -61,12 +59,6 @@ def load_knowledge_base():
                     # Plain text
                     with open(file_path, 'r', encoding='utf-8') as file:
                         text_content = file.read()
-                
-                elif file_path.endswith('.docx'):
-                    # DOCX processing
-                    doc = Document(file_path)
-                    for paragraph in doc.paragraphs:
-                        text_content += paragraph.text + "\n"
                 
                 if text_content.strip():
                     documents.append({
@@ -130,9 +122,9 @@ with st.sidebar:
         st.info("📁 No documents found in knowledge base")
         st.markdown("""
         **To add documents:**
-        1. Create a `knowledge_base` folder
-        2. Add your TXT or DOCX files (PDF coming soon)
-        3. Restart the app
+        1. Use the Admin Panel below to upload .txt files
+        2. OR manually paste content in the admin panel
+        3. Documents will appear immediately
         """)
     
     st.divider()
@@ -149,14 +141,39 @@ with st.sidebar:
             st.success("✅ Admin access granted")
             
             # Upload new documents
-            st.subheader("📤 Upload Documents")
+            st.subheader("📤 Upload Text Documents")
             uploaded_files = st.file_uploader(
-                "Upload knowledge base documents:",
-                type=['txt', 'docx'],
+                "Upload .txt files:",
+                type=['txt'],
                 accept_multiple_files=True,
                 key="admin_upload",
-                help="Supported: TXT, DOCX (PDF support coming soon)"
+                help="Upload plain text files only"
             )
+            
+            # Manual text input option
+            st.subheader("✍️ Add Document Manually")
+            manual_doc_name = st.text_input("Document name:", placeholder="e.g., company-policy.txt")
+            manual_doc_content = st.text_area(
+                "Document content:", 
+                height=200,
+                placeholder="Paste your document content here..."
+            )
+            
+            if st.button("💾 Save Manual Document", type="secondary") and manual_doc_name and manual_doc_content:
+                try:
+                    # Ensure .txt extension
+                    if not manual_doc_name.endswith('.txt'):
+                        manual_doc_name += '.txt'
+                    
+                    # Save manual content to file
+                    file_path = os.path.join("knowledge_base", manual_doc_name)
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(manual_doc_content)
+                    st.success(f"✅ {manual_doc_name} saved successfully!")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error saving {manual_doc_name}: {str(e)}")
             
             if uploaded_files:
                 if st.button("💾 Save Documents", type="primary"):
@@ -315,10 +332,10 @@ with col2:
 
 # Information panel
 if not knowledge_base:
-    st.warning("⚠️ **Knowledge base is empty.** Use the Admin Panel in the sidebar to upload your documents securely.")
-    st.info("📝 **Currently supported:** TXT and DOCX files. PDF support will be added once the app is stable.")
+    st.warning("⚠️ **Knowledge base is empty.** Use the Admin Panel in the sidebar to add your documents.")
+    st.info("💡 **Two ways to add content:** Upload .txt files OR paste content manually in the admin panel.")
 else:
-    st.info(f"💡 **I have access to {len(knowledge_base)} documents** and can answer questions about them!")
+    st.info(f"💡 **I have access to {len(knowledge_base)} text documents** and can answer questions about them!")
 
 # Footer
 st.markdown("---")
