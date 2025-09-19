@@ -32,23 +32,16 @@ try:
 except ImportError:
     pass
 
-# Try importing OpenAI with detailed error handling
+# Try importing OpenAI libraries
 openai_status = "❌ Not available"
-USE_NEW_OPENAI = False
-openai_client = None
-openai = None
+AZURE_OPENAI_AVAILABLE = False
 
 try:
-    from openai import OpenAI
-    USE_NEW_OPENAI = True
-    openai_status = "✅ New OpenAI (v1.x) imported successfully"
-except ImportError as e1:
-    try:
-        import openai
-        USE_NEW_OPENAI = False
-        openai_status = "✅ Old OpenAI (v0.x) imported successfully"
-    except ImportError as e2:
-        openai_status = f"❌ OpenAI import failed. New version error: {e1}. Old version error: {e2}"
+    from openai import AzureOpenAI
+    AZURE_OPENAI_AVAILABLE = True
+    openai_status = "✅ Azure OpenAI imported successfully"
+except ImportError as e:
+    openai_status = f"❌ Azure OpenAI import failed: {e}"
 
 # Title
 st.title("🤖 Knowledge Base Chatbot")
@@ -56,17 +49,22 @@ st.title("🤖 Knowledge Base Chatbot")
 # Debug section
 with st.expander("🔍 Debug Information"):
     st.write("🐍 Python version:", sys.version)
-    st.write("🤖 OpenAI Status:", openai_status)
+    st.write("🤖 Azure OpenAI Status:", openai_status)
     st.write("📄 PDF Support:", "✅ Available" if PDF_AVAILABLE else "❌ Not available")
     st.write("📝 DOCX Support:", "✅ Available" if DOCX_AVAILABLE else "❌ Not available")
+    
+    # Show Azure OpenAI configuration
+    if AZURE_OPENAI_AVAILABLE:
+        st.write("🔧 **Azure OpenAI Configuration:**")
+        st.write(f"  • API Key: {'✅ Set' if os.getenv('AZURE_OPENAI_API_KEY') else '❌ Missing'}")
+        st.write(f"  • Endpoint: {'✅ Set' if os.getenv('AZURE_OPENAI_ENDPOINT') else '❌ Missing'}")
+        st.write(f"  • Deployment: {os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'magroupAI')}")
 
 # Show main status
-if USE_NEW_OPENAI:
-    st.success("✅ Using OpenAI v1.x (new version)")
-elif openai:
-    st.info("ℹ️ Using OpenAI v0.x (legacy version)")
+if AZURE_OPENAI_AVAILABLE:
+    st.success("✅ Using Azure OpenAI")
 else:
-    st.error("❌ OpenAI library is not available")
+    st.error("❌ Azure OpenAI library is not available")
 
 # Show document support status
 doc_support = []
@@ -139,40 +137,36 @@ def load_knowledge_base():
     return documents
 
 def call_openai_api(messages):
-    """Call OpenAI API with compatibility for both old and new versions"""
-    api_key = os.getenv("OPENAI_API_KEY")
+    """Call Azure OpenAI API"""
+    api_key = os.getenv("AZURE_OPENAI_API_KEY")
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "magroupAI")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
     
     if not api_key:
-        return None, "No API key found"
+        return None, "No Azure OpenAI API key found"
+    if not endpoint:
+        return None, "No Azure OpenAI endpoint found"
     
-    if USE_NEW_OPENAI:
-        # New OpenAI v1.x
-        try:
-            client = OpenAI(api_key=api_key)
-            return client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                stream=True,
-                temperature=0.7,
-                max_tokens=2000
-            ), None
-        except Exception as e:
-            return None, f"New OpenAI API error: {str(e)}"
-    elif openai:
-        # Old OpenAI v0.x
-        try:
-            openai.api_key = api_key
-            return openai.ChatCompletion.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                stream=True,
-                temperature=0.7,
-                max_tokens=2000
-            ), None
-        except Exception as e:
-            return None, f"Old OpenAI API error: {str(e)}"
-    else:
-        return None, "OpenAI library not available"
+    try:
+        from openai import AzureOpenAI
+        
+        client = AzureOpenAI(
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=endpoint
+        )
+        
+        return client.chat.completions.create(
+            model=deployment_name,  # This should be your deployment name
+            messages=messages,
+            stream=True,
+            temperature=0.7,
+            max_tokens=2000
+        ), None
+        
+    except Exception as e:
+        return None, f"Azure OpenAI API error: {str(e)}"
 
 # Initialize session state
 if "messages" not in st.session_state:
@@ -347,16 +341,21 @@ if user_input:
         st.markdown(user_input)
     
     # Generate assistant response
-    if not USE_NEW_OPENAI and not openai:
+    if not AZURE_OPENAI_AVAILABLE:
         with st.chat_message("assistant"):
-            st.error("❌ OpenAI library is not available. Cannot generate responses.")
-            st.info("💡 This is likely due to package installation issues on the hosting platform.")
+            st.error("❌ Azure OpenAI library is not available. Cannot generate responses.")
+            st.info("💡 Make sure the OpenAI library is installed and Azure OpenAI credentials are configured.")
     else:
         try:
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
+            api_key = os.getenv("AZURE_OPENAI_API_KEY")
+            endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+            if not api_key or not endpoint:
                 with st.chat_message("assistant"):
-                    st.error("❌ OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
+                    st.error("❌ Azure OpenAI credentials not found. Please check your configuration.")
+                    if not api_key:
+                        st.error("  • Missing: AZURE_OPENAI_API_KEY")
+                    if not endpoint:
+                        st.error("  • Missing: AZURE_OPENAI_ENDPOINT")
             else:
                 with st.chat_message("assistant"):
                     placeholder = st.empty()
@@ -389,7 +388,7 @@ Please provide helpful, accurate responses."""
                     
                     messages_for_api = [system_message] + st.session_state.messages
                     
-                    # Call OpenAI API (compatible with both versions)
+                    # Call Azure OpenAI API
                     stream, error = call_openai_api(messages_for_api)
                     
                     if error:
@@ -398,20 +397,12 @@ Please provide helpful, accurate responses."""
                         placeholder.markdown(error_msg)
                     elif stream:
                         try:
-                            # Stream the response (works with both old and new versions)
+                            # Stream the response
                             for chunk in stream:
-                                if USE_NEW_OPENAI:
-                                    # New version
-                                    if chunk.choices[0].delta.content is not None:
-                                        delta = chunk.choices[0].delta.content
-                                        full_response += delta
-                                        placeholder.markdown(full_response + "▌")
-                                else:
-                                    # Old version
-                                    if chunk.choices[0].get('delta', {}).get('content'):
-                                        delta = chunk.choices[0]['delta']['content']
-                                        full_response += delta
-                                        placeholder.markdown(full_response + "▌")
+                                if chunk.choices[0].delta.content is not None:
+                                    delta = chunk.choices[0].delta.content
+                                    full_response += delta
+                                    placeholder.markdown(full_response + "▌")
                             
                             # Final response without cursor
                             placeholder.markdown(full_response)
@@ -442,7 +433,7 @@ else:
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: gray; font-size: 0.8em;'>"
-    f"Knowledge Base Chatbot • {len(knowledge_base)} documents loaded • OpenAI {'v1.x' if USE_NEW_OPENAI else 'v0.x' if openai else 'unavailable'}"
+    f"Knowledge Base Chatbot • {len(knowledge_base)} documents loaded • Azure OpenAI {'✅' if AZURE_OPENAI_AVAILABLE else '❌'}"
     "</div>", 
     unsafe_allow_html=True
 )
