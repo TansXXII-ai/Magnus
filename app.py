@@ -2,8 +2,6 @@ import os
 import json
 import streamlit as st
 from datetime import datetime
-import requests
-import base64
 
 # Page config
 st.set_page_config(
@@ -19,125 +17,101 @@ try:
 except ImportError:
     AZURE_OPENAI_AVAILABLE = False
 
+# Import Dropbox
+try:
+    import dropbox
+    DROPBOX_AVAILABLE = True
+except ImportError:
+    DROPBOX_AVAILABLE = False
+
 # Title
 st.title("🤖 Knowledge Base Chatbot")
 
-# SharePoint API functions
-class SharePointConnector:
+# Dropbox API functions
+class DropboxConnector:
     def __init__(self):
-        self.tenant_id = os.getenv("MS_TENANT_ID")
-        self.client_id = os.getenv("MS_CLIENT_ID") 
-        self.client_secret = os.getenv("MS_CLIENT_SECRET")
-        self.site_url = os.getenv("SHAREPOINT_SITE_URL")  # e.g., "https://yourcompany.sharepoint.com/sites/documents"
-        self.access_token = None
+        self.access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
+        self.folder_path = os.getenv("DROPBOX_FOLDER_PATH", "/KnowledgeBase")  # Default folder
+        self.dbx = None
+        
+        if self.access_token and DROPBOX_AVAILABLE:
+            self.dbx = dropbox.Dropbox(self.access_token)
     
-    def get_access_token(self):
-        """Get access token for Microsoft Graph API"""
-        try:
-            token_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
-            
-            data = {
-                'grant_type': 'client_credentials',
-                'client_id': self.client_id,
-                'client_secret': self.client_secret,
-                'scope': 'https://graph.microsoft.com/.default'
-            }
-            
-            response = requests.post(token_url, data=data)
-            if response.status_code == 200:
-                self.access_token = response.json()['access_token']
-                return True
-            return False
-        except Exception as e:
-            st.error(f"Authentication error: {str(e)}")
-            return False
-    
-    def get_site_documents(self, folder_path="Documents"):
-        """Fetch documents from SharePoint site"""
-        if not self.access_token and not self.get_access_token():
+    def get_documents(self):
+        """Fetch documents from Dropbox folder"""
+        if not self.dbx:
             return []
         
         try:
-            # Get site ID first
-            site_api_url = f"https://graph.microsoft.com/v1.0/sites/{self.site_url}"
-            headers = {'Authorization': f'Bearer {self.access_token}'}
+            documents = []
             
-            # Get documents from specified folder
-            docs_url = f"https://graph.microsoft.com/v1.0/sites/{self.site_url}/drive/root:/{folder_path}:/children"
+            # List files in the specified folder
+            result = self.dbx.files_list_folder(self.folder_path)
             
-            response = requests.get(docs_url, headers=headers)
-            
-            if response.status_code == 200:
-                files = response.json().get('value', [])
-                documents = []
-                
-                for file_info in files:
-                    if file_info.get('file'):  # Only process files, not folders
-                        doc_content = self.get_file_content(file_info['id'])
-                        if doc_content:
+            for entry in result.entries:
+                if isinstance(entry, dropbox.files.FileMetadata):
+                    # Only process text files for now (can extend later)
+                    if entry.name.lower().endswith(('.txt', '.md', '.csv')):
+                        content = self.get_file_content(entry.path_lower)
+                        if content:
                             documents.append({
-                                'name': file_info['name'],
-                                'content': doc_content,
-                                'source': 'sharepoint',
-                                'modified': file_info.get('lastModifiedDateTime', ''),
-                                'size': file_info.get('size', 0)
+                                'name': entry.name,
+                                'content': content,
+                                'source': 'dropbox',
+                                'modified': entry.server_modified.isoformat() if entry.server_modified else '',
+                                'size': entry.size,
+                                'path': entry.path_lower
                             })
-                
-                return documents
             
+            return documents
+            
+        except dropbox.exceptions.AuthError:
+            st.error("❌ Dropbox authentication failed. Check your access token.")
             return []
-            
+        except dropbox.exceptions.ApiError as e:
+            st.error(f"❌ Dropbox API error: {str(e)}")
+            return []
         except Exception as e:
-            st.error(f"Error fetching SharePoint documents: {str(e)}")
+            st.error(f"❌ Error fetching Dropbox documents: {str(e)}")
             return []
     
-    def get_file_content(self, file_id):
+    def get_file_content(self, file_path):
         """Get content of a specific file"""
         try:
-            headers = {'Authorization': f'Bearer {self.access_token}'}
-            
-            # Get file download URL
-            download_url = f"https://graph.microsoft.com/v1.0/me/drive/items/{file_id}/content"
-            
-            response = requests.get(download_url, headers=headers)
-            
-            if response.status_code == 200:
-                # For now, handle text files only
-                # You'd need additional processing for PDF/DOCX
-                try:
-                    return response.text
-                except:
-                    return "Binary file - content not readable as text"
-            
-            return None
-            
+            _, response = self.dbx.files_download(file_path)
+            content = response.content.decode('utf-8')
+            return content
+        except UnicodeDecodeError:
+            return f"File {file_path} contains binary data - cannot display as text"
         except Exception as e:
-            return f"Error reading file: {str(e)}"
+            return f"Error reading file {file_path}: {str(e)}"
 
-# Initialize SharePoint connector
+# Initialize Dropbox connector
 @st.cache_resource
-def get_sharepoint_connector():
-    return SharePointConnector()
+def get_dropbox_connector():
+    return DropboxConnector()
 
-# Load documents from SharePoint
-@st.cache_data(ttl=600)  # Cache for 10 minutes
+# Load documents from Dropbox
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_knowledge_base():
-    """Load documents from SharePoint"""
-    connector = get_sharepoint_connector()
+    """Load documents from Dropbox"""
+    connector = get_dropbox_connector()
     
     # Check if credentials are configured
-    required_vars = ["MS_TENANT_ID", "MS_CLIENT_ID", "MS_CLIENT_SECRET", "SHAREPOINT_SITE_URL"]
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
     
-    if missing_vars:
-        st.warning(f"SharePoint not configured. Missing: {', '.join(missing_vars)}")
+    if not access_token:
+        return []
+    
+    if not DROPBOX_AVAILABLE:
+        st.error("❌ Dropbox library not available. Check requirements.txt")
         return []
     
     try:
-        documents = connector.get_site_documents()
+        documents = connector.get_documents()
         return documents
     except Exception as e:
-        st.error(f"Failed to load SharePoint documents: {str(e)}")
+        st.error(f"Failed to load Dropbox documents: {str(e)}")
         return []
 
 def call_openai_api(messages):
@@ -185,22 +159,24 @@ with st.sidebar:
     else:
         st.error("❌ Azure OpenAI Unavailable")
     
-    # SharePoint status
-    sharepoint_configured = all(os.getenv(var) for var in ["MS_TENANT_ID", "MS_CLIENT_ID", "MS_CLIENT_SECRET", "SHAREPOINT_SITE_URL"])
+    # Dropbox status
+    dropbox_token = os.getenv("DROPBOX_ACCESS_TOKEN")
     
-    if sharepoint_configured:
-        st.success("✅ SharePoint Configured")
-    else:
-        st.error("❌ SharePoint Not Configured")
+    if dropbox_token and DROPBOX_AVAILABLE:
+        st.success("✅ Dropbox Connected")
+    elif not dropbox_token:
+        st.error("❌ Dropbox Token Missing")
+    elif not DROPBOX_AVAILABLE:
+        st.error("❌ Dropbox Library Missing")
     
-    st.info("📄 **Live SharePoint Integration**")
+    st.info("📄 **Live Dropbox Integration**")
     
     st.divider()
     
     st.header("📚 Knowledge Base")
     
     if knowledge_base:
-        st.success(f"✅ {len(knowledge_base)} SharePoint documents loaded")
+        st.success(f"✅ {len(knowledge_base)} Dropbox documents loaded")
         
         # Show refresh button
         if st.button("🔄 Refresh Documents", key="refresh_docs"):
@@ -208,20 +184,20 @@ with st.sidebar:
             st.rerun()
         
         # Show last update time
-        st.caption("📅 Auto-refreshes every 10 minutes")
+        st.caption("📅 Auto-refreshes every 5 minutes")
         
     else:
-        st.warning("⚠️ No SharePoint documents found")
-        if sharepoint_configured:
-            st.info("Check SharePoint permissions and document folder")
+        st.warning("⚠️ No Dropbox documents found")
+        if dropbox_token:
+            st.info("Check Dropbox folder and file permissions")
         else:
-            st.info("Configure SharePoint credentials in secrets")
+            st.info("Configure Dropbox access token in secrets")
     
     st.divider()
     
     # Admin panel
     with st.expander("🔒 Admin Panel"):
-        st.write("**SharePoint Integration Management**")
+        st.write("**Dropbox Integration Management**")
         
         admin_password = st.text_input("Admin Password:", type="password", key="admin_password_input")
         correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")
@@ -230,26 +206,25 @@ with st.sidebar:
             st.success("✅ Admin access granted")
             
             if knowledge_base:
-                st.subheader("📄 SharePoint Documents")
+                st.subheader("📄 Dropbox Documents")
                 for idx, doc in enumerate(knowledge_base):
                     with st.expander(f"📄 {doc['name']}"):
                         st.write(f"**File:** {doc['name']}")
-                        st.write(f"**Source:** SharePoint")
+                        st.write(f"**Source:** Dropbox")
                         st.write(f"**Size:** {doc.get('size', 'Unknown')} bytes")
                         st.write(f"**Modified:** {doc.get('modified', 'Unknown')}")
+                        st.write(f"**Path:** {doc.get('path', 'Unknown')}")
                         preview_text = doc['content'][:200] + "..." if len(doc['content']) > 200 else doc['content']
                         st.text_area("Content preview:", preview_text, height=100, disabled=True, key=f"admin_preview_{idx}")
             
             st.divider()
             
-            st.subheader("⚙️ SharePoint Configuration Status")
+            st.subheader("⚙️ Dropbox Configuration Status")
             
             # Show configuration status
             config_items = [
-                ("MS_TENANT_ID", "Azure Tenant ID"),
-                ("MS_CLIENT_ID", "App Registration Client ID"), 
-                ("MS_CLIENT_SECRET", "App Registration Secret"),
-                ("SHAREPOINT_SITE_URL", "SharePoint Site URL")
+                ("DROPBOX_ACCESS_TOKEN", "Dropbox Access Token"),
+                ("DROPBOX_FOLDER_PATH", "Dropbox Folder Path (optional)")
             ]
             
             for env_var, description in config_items:
@@ -257,17 +232,18 @@ with st.sidebar:
                 if value:
                     st.success(f"✅ {description}: Configured")
                 else:
-                    st.error(f"❌ {description}: Missing")
+                    if env_var == "DROPBOX_FOLDER_PATH":
+                        st.info(f"ℹ️ {description}: Using default (/KnowledgeBase)")
+                    else:
+                        st.error(f"❌ {description}: Missing")
             
             st.divider()
             
             st.subheader("📋 Quick Reference")
             st.code('''
 # Add these to your Streamlit secrets:
-MS_TENANT_ID = "your-azure-tenant-id"
-MS_CLIENT_ID = "your-app-registration-client-id"  
-MS_CLIENT_SECRET = "your-app-registration-secret"
-SHAREPOINT_SITE_URL = "yourcompany.sharepoint.com/sites/yoursite"
+DROPBOX_ACCESS_TOKEN = "your-dropbox-access-token"
+DROPBOX_FOLDER_PATH = "/KnowledgeBase"  # Optional, defaults to /KnowledgeBase
 
 # Azure OpenAI (existing)
 AZURE_OPENAI_API_KEY = "your-key"
@@ -355,9 +331,9 @@ if user_input:
                     # System message with knowledge base
                     system_message = {
                         "role": "system", 
-                        "content": f"""You are a helpful AI assistant with access to company documents from SharePoint. 
+                        "content": f"""You are a helpful AI assistant with access to company documents from Dropbox. 
 
-{f"COMPANY KNOWLEDGE BASE (from SharePoint):\n{knowledge_context}" if knowledge_context else "You don't currently have access to any company documents from SharePoint."}
+{f"COMPANY KNOWLEDGE BASE (from Dropbox):\n{knowledge_context}" if knowledge_context else "You don't currently have access to any company documents from Dropbox."}
 
 When answering questions:
 1. First check if the answer can be found in the company documents
@@ -366,7 +342,7 @@ When answering questions:
 4. Be accurate and cite your sources when using company information
 5. If you're unsure, say so rather than guessing
 
-Please provide helpful, accurate responses based on company SharePoint documents when available."""
+Please provide helpful, accurate responses based on company Dropbox documents when available."""
                     }
                     
                     messages_for_api = [system_message] + st.session_state.messages
@@ -414,7 +390,7 @@ Please provide helpful, accurate responses based on company SharePoint documents
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: gray; font-size: 0.8em;'>"
-    f"SharePoint Knowledge Base Chatbot • {len(knowledge_base)} documents • Live Integration"
+    f"Dropbox Knowledge Base Chatbot • {len(knowledge_base)} documents • Live Integration"
     "</div>", 
     unsafe_allow_html=True
 )
