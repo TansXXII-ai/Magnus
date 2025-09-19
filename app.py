@@ -12,8 +12,25 @@ st.set_page_config(
     layout="wide"
 )
 
-# Debug: Show Python version and installed packages
-st.write("🐍 Python version:", sys.version)
+# Try importing document processing libraries
+PDF_AVAILABLE = False
+DOCX_AVAILABLE = False
+
+try:
+    import pypdf
+    PDF_AVAILABLE = True
+except ImportError:
+    try:
+        import PyPDF2 as pypdf
+        PDF_AVAILABLE = True
+    except ImportError:
+        pass
+
+try:
+    from docx import Document
+    DOCX_AVAILABLE = True
+except ImportError:
+    pass
 
 # Try importing OpenAI with detailed error handling
 openai_status = "❌ Not available"
@@ -33,8 +50,6 @@ except ImportError as e1:
     except ImportError as e2:
         openai_status = f"❌ OpenAI import failed. New version error: {e1}. Old version error: {e2}"
 
-st.write("🤖 OpenAI Status:", openai_status)
-
 # Title
 st.title("🤖 Knowledge Base Chatbot")
 
@@ -42,18 +57,8 @@ st.title("🤖 Knowledge Base Chatbot")
 with st.expander("🔍 Debug Information"):
     st.write("🐍 Python version:", sys.version)
     st.write("🤖 OpenAI Status:", openai_status)
-    
-    # Show installed packages
-    try:
-        import pkg_resources
-        installed_packages = [d.project_name + "==" + d.version for d in pkg_resources.working_set]
-        st.write("📦 Installed packages:")
-        for pkg in sorted(installed_packages)[:10]:  # Show first 10
-            st.write(f"  • {pkg}")
-        if len(installed_packages) > 10:
-            st.write(f"  ... and {len(installed_packages) - 10} more")
-    except:
-        st.write("📦 Could not retrieve package information")
+    st.write("📄 PDF Support:", "✅ Available" if PDF_AVAILABLE else "❌ Not available")
+    st.write("📝 DOCX Support:", "✅ Available" if DOCX_AVAILABLE else "❌ Not available")
 
 # Show main status
 if USE_NEW_OPENAI:
@@ -62,14 +67,16 @@ elif openai:
     st.info("ℹ️ Using OpenAI v0.x (legacy version)")
 else:
     st.error("❌ OpenAI library is not available")
-    st.warning("⚠️ **Issue:** The OpenAI package is not installed on this hosting platform.")
-    st.info("🛠️ **Possible solutions:**\n1. Try different hosting (Railway, Render)\n2. Contact Streamlit support\n3. Use a different requirements.txt format")
 
-# Notice about file support
-if USE_NEW_OPENAI or openai:
-    st.info("📝 **Simple & Reliable:** Currently supports plain text files (.txt) and manual content input for maximum compatibility.")
-else:
-    st.info("📝 **Knowledge base features available** but AI responses disabled due to missing OpenAI package.")
+# Show document support status
+doc_support = []
+if PDF_AVAILABLE:
+    doc_support.append("PDF")
+if DOCX_AVAILABLE:
+    doc_support.append("DOCX")
+doc_support.append("TXT")
+
+st.info(f"📄 **Document Support:** {', '.join(doc_support)} files")
 
 # Ensure knowledge_base directory exists
 os.makedirs("knowledge_base", exist_ok=True)
@@ -84,10 +91,12 @@ def load_knowledge_base():
     if not os.path.exists(knowledge_base_path):
         return []
     
-    # Supported file types (only plain text for now)
-    file_patterns = [
-        f"{knowledge_base_path}/*.txt"
-    ]
+    # Supported file types based on available libraries
+    file_patterns = [f"{knowledge_base_path}/*.txt"]
+    if PDF_AVAILABLE:
+        file_patterns.append(f"{knowledge_base_path}/*.pdf")
+    if DOCX_AVAILABLE:
+        file_patterns.append(f"{knowledge_base_path}/*.docx")
     
     for pattern in file_patterns:
         for file_path in glob.glob(pattern):
@@ -99,6 +108,23 @@ def load_knowledge_base():
                     # Plain text
                     with open(file_path, 'r', encoding='utf-8') as file:
                         text_content = file.read()
+                
+                elif file_path.endswith('.pdf') and PDF_AVAILABLE:
+                    # PDF processing
+                    with open(file_path, 'rb') as file:
+                        if hasattr(pypdf, 'PdfReader'):
+                            pdf_reader = pypdf.PdfReader(file)
+                        else:
+                            pdf_reader = pypdf.PdfFileReader(file)
+                        
+                        for page in pdf_reader.pages:
+                            text_content += page.extract_text() + "\n"
+                
+                elif file_path.endswith('.docx') and DOCX_AVAILABLE:
+                    # DOCX processing
+                    doc = Document(file_path)
+                    for paragraph in doc.paragraphs:
+                        text_content += paragraph.text + "\n"
                 
                 if text_content.strip():
                     documents.append({
@@ -164,17 +190,17 @@ with st.sidebar:
         
         # Show loaded documents
         with st.expander("📄 Available Documents"):
-            for doc in knowledge_base:
+            for idx, doc in enumerate(knowledge_base):
                 st.write(f"• **{doc['name']}**")
-                if st.checkbox(f"Preview {doc['name']}", key=f"preview_{doc['name']}"):
+                if st.checkbox(f"Preview {doc['name']}", key=f"preview_doc_{idx}"):
                     preview_text = doc['content'][:300] + "..." if len(doc['content']) > 300 else doc['content']
-                    st.text_area("Content preview:", preview_text, height=100, disabled=True)
+                    st.text_area("Content preview:", preview_text, height=100, disabled=True, key=f"preview_text_{idx}")
     else:
         st.info("📁 No documents found in knowledge base")
         st.markdown("""
         **To add documents:**
-        1. Use the Admin Panel below to upload .txt files
-        2. OR manually paste content in the admin panel
+        1. Use the Admin Panel below
+        2. Upload files or paste content manually
         3. Documents will appear immediately
         """)
     
@@ -185,32 +211,41 @@ with st.sidebar:
         st.write("**Secure Document Management**")
         
         # Admin password check
-        admin_password = st.text_input("Admin Password:", type="password", key="admin_pass")
+        admin_password = st.text_input("Admin Password:", type="password", key="admin_password_input")
         correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")
         
         if admin_password == correct_password:
             st.success("✅ Admin access granted")
             
             # Upload new documents
-            st.subheader("📤 Upload Text Documents")
+            st.subheader("📤 Upload Documents")
+            
+            # Dynamic file types based on available libraries
+            allowed_types = ['txt']
+            if PDF_AVAILABLE:
+                allowed_types.append('pdf')
+            if DOCX_AVAILABLE:
+                allowed_types.append('docx')
+            
             uploaded_files = st.file_uploader(
-                "Upload .txt files:",
-                type=['txt'],
+                f"Upload documents ({', '.join(allowed_types.upper())}):",
+                type=allowed_types,
                 accept_multiple_files=True,
-                key="admin_upload",
-                help="Upload plain text files only"
+                key="document_uploader",
+                help=f"Supported formats: {', '.join(allowed_types.upper())}"
             )
             
             # Manual text input option
             st.subheader("✍️ Add Document Manually")
-            manual_doc_name = st.text_input("Document name:", placeholder="e.g., company-policy.txt")
+            manual_doc_name = st.text_input("Document name:", placeholder="e.g., company-policy.txt", key="manual_doc_name")
             manual_doc_content = st.text_area(
                 "Document content:", 
                 height=200,
-                placeholder="Paste your document content here..."
+                placeholder="Paste your document content here...",
+                key="manual_doc_content"
             )
             
-            if st.button("💾 Save Manual Document", type="secondary") and manual_doc_name and manual_doc_content:
+            if st.button("💾 Save Manual Document", type="secondary", key="save_manual_doc") and manual_doc_name and manual_doc_content:
                 try:
                     # Ensure .txt extension
                     if not manual_doc_name.endswith('.txt'):
@@ -227,7 +262,7 @@ with st.sidebar:
                     st.error(f"❌ Error saving {manual_doc_name}: {str(e)}")
             
             if uploaded_files:
-                if st.button("💾 Save Documents", type="primary"):
+                if st.button("💾 Save Uploaded Documents", type="primary", key="save_uploaded_docs"):
                     for uploaded_file in uploaded_files:
                         try:
                             # Save file to knowledge_base folder
@@ -245,12 +280,12 @@ with st.sidebar:
             # Manage existing documents
             if knowledge_base:
                 st.subheader("🗑️ Manage Documents")
-                for doc in knowledge_base:
+                for idx, doc in enumerate(knowledge_base):
                     col1, col2 = st.columns([3, 1])
                     with col1:
                         st.write(f"📄 {doc['name']}")
                     with col2:
-                        if st.button("🗑️", key=f"delete_{doc['name']}", help=f"Delete {doc['name']}"):
+                        if st.button("🗑️", key=f"delete_doc_{idx}", help=f"Delete {doc['name']}"):
                             try:
                                 os.remove(doc['path'])
                                 st.success(f"✅ {doc['name']} deleted")
@@ -268,7 +303,7 @@ with st.sidebar:
     
     # Chat controls
     if st.session_state.messages:
-        if st.button("🗑️ Clear Chat", type="secondary"):
+        if st.button("🗑️ Clear Chat", type="secondary", key="clear_chat_button"):
             st.session_state.messages = []
             st.rerun()
 
@@ -277,7 +312,7 @@ col1, col2 = st.columns([3, 1])
 
 with col1:
     # Display chat history
-    for message in st.session_state.messages:
+    for idx, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
@@ -297,34 +332,31 @@ with col2:
             data=json.dumps(export_data, indent=2),
             file_name=f"chat_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
             mime="application/json",
-            help="Download conversation history"
+            help="Download conversation history",
+            key="export_chat_button"
         )
 
-# Chat input (MUST be outside columns)
-if prompt := st.chat_input("Ask me anything - I have access to the knowledge base..."):
-        # Add user message
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-# Chat input (MUST be outside columns)
-if prompt := st.chat_input("Ask me anything - I have access to the knowledge base..."):
+# Chat input (MUST be outside columns and have unique key)
+user_input = st.chat_input("Ask me anything - I have access to the knowledge base...", key="main_chat_input")
+
+if user_input:
     # Add user message
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.messages.append({"role": "user", "content": user_input})
     
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.markdown(user_input)
     
     # Generate assistant response
     if not USE_NEW_OPENAI and not openai:
-        st.error("❌ OpenAI library is not available. Cannot generate responses.")
-        st.info("💡 This is likely due to package installation issues on the hosting platform.")
+        with st.chat_message("assistant"):
+            st.error("❌ OpenAI library is not available. Cannot generate responses.")
+            st.info("💡 This is likely due to package installation issues on the hosting platform.")
     else:
         try:
             api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
-                st.error("❌ OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
+                with st.chat_message("assistant"):
+                    st.error("❌ OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
             else:
                 with st.chat_message("assistant"):
                     placeholder = st.empty()
@@ -396,14 +428,15 @@ Please provide helpful, accurate responses."""
                             placeholder.markdown(error_msg)
         
         except Exception as e:
-            st.error(f"❌ Unexpected error: {str(e)}")
+            with st.chat_message("assistant"):
+                st.error(f"❌ Unexpected error: {str(e)}")
 
 # Information panel
 if not knowledge_base:
     st.warning("⚠️ **Knowledge base is empty.** Use the Admin Panel in the sidebar to add your documents.")
-    st.info("💡 **Two ways to add content:** Upload .txt files OR paste content manually in the admin panel.")
+    st.info(f"💡 **Supported formats:** {', '.join(['TXT'] + (['PDF'] if PDF_AVAILABLE else []) + (['DOCX'] if DOCX_AVAILABLE else []))}")
 else:
-    st.info(f"💡 **I have access to {len(knowledge_base)} text documents** and can answer questions about them!")
+    st.info(f"💡 **I have access to {len(knowledge_base)} documents** and can answer questions about them!")
 
 # Footer
 st.markdown("---")
