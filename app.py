@@ -45,7 +45,22 @@ except ImportError:
     pass
 
 # Title
-st.title("🤖 Knowledge Base Chatbot")
+st.title("🤖 MAGnus - MA Groups Knowledge Bot")
+
+# Information section about the chatbot
+st.markdown("""
+**Welcome to the MAGnus Knowledge Base Chatbot!** This AI assistant has access to company documents and can help you find information quickly.
+
+**What you can ask:**
+- **How to**: "Create a new claim in Pulse" or "How do I log into the phone system"
+
+**Tips for better results:**
+- Be specific with your questions
+- Ask follow-up questions if you need more details
+- The chatbot will tell you which document contains the information
+
+---
+""")
 
 # Dropbox API functions
 class DropboxConnector:
@@ -462,4 +477,5 @@ st.markdown(
     "</div>", 
     unsafe_allow_html=True
 )
+
 
