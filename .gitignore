@@ -1,0 +1,32 @@
+# Sensitive documents - never commit these!
+knowledge_base/
+*.pdf
+*.docx
+*.txt
+
+# Environment files
+.env
+.streamlit/secrets.toml
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Streamlit cache
+.streamlit/
