@@ -2,8 +2,8 @@ import os
 import json
 import streamlit as st
 from datetime import datetime
-import glob
-import sys
+import requests
+import base64
 
 # Page config
 st.set_page_config(
@@ -12,132 +12,145 @@ st.set_page_config(
     layout="wide"
 )
 
-# Try importing document processing libraries
-PDF_AVAILABLE = False
-DOCX_AVAILABLE = False
-
-try:
-    import pypdf
-    PDF_AVAILABLE = True
-except ImportError:
-    try:
-        import PyPDF2 as pypdf
-        PDF_AVAILABLE = True
-    except ImportError:
-        pass
-
-try:
-    from docx import Document
-    DOCX_AVAILABLE = True
-except ImportError:
-    pass
-
-# Try importing OpenAI libraries
-openai_status = "❌ Not available"
-AZURE_OPENAI_AVAILABLE = False
-
+# Import Azure OpenAI
 try:
     from openai import AzureOpenAI
     AZURE_OPENAI_AVAILABLE = True
-    openai_status = "✅ Azure OpenAI imported successfully"
-except ImportError as e:
-    openai_status = f"❌ Azure OpenAI import failed: {e}"
+except ImportError:
+    AZURE_OPENAI_AVAILABLE = False
 
 # Title
 st.title("🤖 Knowledge Base Chatbot")
 
-# Debug section (keep this in main area since it's collapsible)
-with st.expander("🔍 Debug Information"):
-    st.write("🐍 Python version:", sys.version)
-    st.write("🤖 Azure OpenAI Status:", openai_status)
-    st.write("📄 PDF Support:", "✅ Available" if PDF_AVAILABLE else "❌ Not available")
-    st.write("📝 DOCX Support:", "✅ Available" if DOCX_AVAILABLE else "❌ Not available")
+# SharePoint API functions
+class SharePointConnector:
+    def __init__(self):
+        self.tenant_id = os.getenv("MS_TENANT_ID")
+        self.client_id = os.getenv("MS_CLIENT_ID") 
+        self.client_secret = os.getenv("MS_CLIENT_SECRET")
+        self.site_url = os.getenv("SHAREPOINT_SITE_URL")  # e.g., "https://yourcompany.sharepoint.com/sites/documents"
+        self.access_token = None
     
-    # Show Azure OpenAI configuration
-    if AZURE_OPENAI_AVAILABLE:
-        st.write("🔧 **Azure OpenAI Configuration:**")
-        st.write(f"  • API Key: {'✅ Set' if os.getenv('AZURE_OPENAI_API_KEY') else '❌ Missing'}")
-        st.write(f"  • Endpoint: {'✅ Set' if os.getenv('AZURE_OPENAI_ENDPOINT') else '❌ Missing'}")
-        st.write(f"  • Deployment: {os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'magroupAI')}")
+    def get_access_token(self):
+        """Get access token for Microsoft Graph API"""
+        try:
+            token_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
+            
+            data = {
+                'grant_type': 'client_credentials',
+                'client_id': self.client_id,
+                'client_secret': self.client_secret,
+                'scope': 'https://graph.microsoft.com/.default'
+            }
+            
+            response = requests.post(token_url, data=data)
+            if response.status_code == 200:
+                self.access_token = response.json()['access_token']
+                return True
+            return False
+        except Exception as e:
+            st.error(f"Authentication error: {str(e)}")
+            return False
+    
+    def get_site_documents(self, folder_path="Documents"):
+        """Fetch documents from SharePoint site"""
+        if not self.access_token and not self.get_access_token():
+            return []
+        
+        try:
+            # Get site ID first
+            site_api_url = f"https://graph.microsoft.com/v1.0/sites/{self.site_url}"
+            headers = {'Authorization': f'Bearer {self.access_token}'}
+            
+            # Get documents from specified folder
+            docs_url = f"https://graph.microsoft.com/v1.0/sites/{self.site_url}/drive/root:/{folder_path}:/children"
+            
+            response = requests.get(docs_url, headers=headers)
+            
+            if response.status_code == 200:
+                files = response.json().get('value', [])
+                documents = []
+                
+                for file_info in files:
+                    if file_info.get('file'):  # Only process files, not folders
+                        doc_content = self.get_file_content(file_info['id'])
+                        if doc_content:
+                            documents.append({
+                                'name': file_info['name'],
+                                'content': doc_content,
+                                'source': 'sharepoint',
+                                'modified': file_info.get('lastModifiedDateTime', ''),
+                                'size': file_info.get('size', 0)
+                            })
+                
+                return documents
+            
+            return []
+            
+        except Exception as e:
+            st.error(f"Error fetching SharePoint documents: {str(e)}")
+            return []
+    
+    def get_file_content(self, file_id):
+        """Get content of a specific file"""
+        try:
+            headers = {'Authorization': f'Bearer {self.access_token}'}
+            
+            # Get file download URL
+            download_url = f"https://graph.microsoft.com/v1.0/me/drive/items/{file_id}/content"
+            
+            response = requests.get(download_url, headers=headers)
+            
+            if response.status_code == 200:
+                # For now, handle text files only
+                # You'd need additional processing for PDF/DOCX
+                try:
+                    return response.text
+                except:
+                    return "Binary file - content not readable as text"
+            
+            return None
+            
+        except Exception as e:
+            return f"Error reading file: {str(e)}"
 
-# Clean main area - just show essential info
-st.markdown("---")
+# Initialize SharePoint connector
+@st.cache_resource
+def get_sharepoint_connector():
+    return SharePointConnector()
 
-# Ensure knowledge_base directory exists
-os.makedirs("knowledge_base", exist_ok=True)
-
-# Load knowledge base documents
-@st.cache_data
+# Load documents from SharePoint
+@st.cache_data(ttl=600)  # Cache for 10 minutes
 def load_knowledge_base():
-    """Load all documents from the knowledge base folder"""
-    documents = []
-    knowledge_base_path = "knowledge_base"
+    """Load documents from SharePoint"""
+    connector = get_sharepoint_connector()
     
-    if not os.path.exists(knowledge_base_path):
+    # Check if credentials are configured
+    required_vars = ["MS_TENANT_ID", "MS_CLIENT_ID", "MS_CLIENT_SECRET", "SHAREPOINT_SITE_URL"]
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    
+    if missing_vars:
+        st.warning(f"SharePoint not configured. Missing: {', '.join(missing_vars)}")
         return []
     
-    # Supported file types based on available libraries
-    file_patterns = [f"{knowledge_base_path}/*.txt"]
-    if PDF_AVAILABLE:
-        file_patterns.append(f"{knowledge_base_path}/*.pdf")
-    if DOCX_AVAILABLE:
-        file_patterns.append(f"{knowledge_base_path}/*.docx")
-    
-    for pattern in file_patterns:
-        for file_path in glob.glob(pattern):
-            try:
-                filename = os.path.basename(file_path)
-                text_content = ""
-                
-                if file_path.endswith('.txt'):
-                    # Plain text
-                    with open(file_path, 'r', encoding='utf-8') as file:
-                        text_content = file.read()
-                
-                elif file_path.endswith('.pdf') and PDF_AVAILABLE:
-                    # PDF processing
-                    with open(file_path, 'rb') as file:
-                        if hasattr(pypdf, 'PdfReader'):
-                            pdf_reader = pypdf.PdfReader(file)
-                        else:
-                            pdf_reader = pypdf.PdfFileReader(file)
-                        
-                        for page in pdf_reader.pages:
-                            text_content += page.extract_text() + "\n"
-                
-                elif file_path.endswith('.docx') and DOCX_AVAILABLE:
-                    # DOCX processing
-                    doc = Document(file_path)
-                    for paragraph in doc.paragraphs:
-                        text_content += paragraph.text + "\n"
-                
-                if text_content.strip():
-                    documents.append({
-                        'name': filename,
-                        'content': text_content.strip(),
-                        'path': file_path
-                    })
-            
-            except Exception as e:
-                st.error(f"Error loading {filename}: {str(e)}")
-    
-    return documents
+    try:
+        documents = connector.get_site_documents()
+        return documents
+    except Exception as e:
+        st.error(f"Failed to load SharePoint documents: {str(e)}")
+        return []
 
 def call_openai_api(messages):
     """Call Azure OpenAI API"""
     api_key = os.getenv("AZURE_OPENAI_API_KEY")
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "magroupAI")
+    deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1-mini")
     api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
     
-    if not api_key:
-        return None, "No Azure OpenAI API key found"
-    if not endpoint:
-        return None, "No Azure OpenAI endpoint found"
+    if not api_key or not endpoint:
+        return None, "Missing Azure OpenAI credentials"
     
     try:
-        from openai import AzureOpenAI
-        
         client = AzureOpenAI(
             api_key=api_key,
             api_version=api_version,
@@ -145,7 +158,7 @@ def call_openai_api(messages):
         )
         
         return client.chat.completions.create(
-            model=deployment_name,  # This should be your deployment name
+            model=deployment_name,
             messages=messages,
             stream=True,
             temperature=0.7,
@@ -162,139 +175,111 @@ if "messages" not in st.session_state:
 # Load knowledge base
 knowledge_base = load_knowledge_base()
 
-# Sidebar for knowledge base info and admin panel
+# Sidebar
 with st.sidebar:
-    # Status section at top of sidebar
+    # Status section
     st.header("📊 Status")
     
-    # Show AI status
     if AZURE_OPENAI_AVAILABLE:
         st.success("✅ Azure OpenAI Connected")
     else:
         st.error("❌ Azure OpenAI Unavailable")
     
-    # Show document support status
-    doc_support = []
-    if PDF_AVAILABLE:
-        doc_support.append("PDF")
-    if DOCX_AVAILABLE:
-        doc_support.append("DOCX")
-    doc_support.append("TXT")
+    # SharePoint status
+    sharepoint_configured = all(os.getenv(var) for var in ["MS_TENANT_ID", "MS_CLIENT_ID", "MS_CLIENT_SECRET", "SHAREPOINT_SITE_URL"])
     
-    st.info(f"📄 **Supported:** {', '.join(doc_support)}")
+    if sharepoint_configured:
+        st.success("✅ SharePoint Configured")
+    else:
+        st.error("❌ SharePoint Not Configured")
+    
+    st.info("📄 **Live SharePoint Integration**")
     
     st.divider()
     
     st.header("📚 Knowledge Base")
     
     if knowledge_base:
-        st.success(f"✅ {len(knowledge_base)} documents loaded")
+        st.success(f"✅ {len(knowledge_base)} SharePoint documents loaded")
         
-        # Show loaded documents
-        with st.expander("📄 Available Documents"):
-            for idx, doc in enumerate(knowledge_base):
-                st.write(f"• **{doc['name']}**")
-                if st.checkbox(f"Preview {doc['name']}", key=f"preview_doc_{idx}"):
-                    preview_text = doc['content'][:300] + "..." if len(doc['content']) > 300 else doc['content']
-                    st.text_area("Content preview:", preview_text, height=100, disabled=True, key=f"preview_text_{idx}")
+        # Show refresh button
+        if st.button("🔄 Refresh Documents", key="refresh_docs"):
+            st.cache_data.clear()
+            st.rerun()
+        
+        # Show last update time
+        st.caption("📅 Auto-refreshes every 10 minutes")
+        
     else:
-        st.warning("⚠️ Knowledge base is empty")
-        st.info("Use the Admin Panel below to add documents")
+        st.warning("⚠️ No SharePoint documents found")
+        if sharepoint_configured:
+            st.info("Check SharePoint permissions and document folder")
+        else:
+            st.info("Configure SharePoint credentials in secrets")
     
     st.divider()
     
-    # 🔒 ADMIN PANEL
+    # Admin panel
     with st.expander("🔒 Admin Panel"):
-        st.write("**Secure Document Management**")
+        st.write("**SharePoint Integration Management**")
         
-        # Admin password check
         admin_password = st.text_input("Admin Password:", type="password", key="admin_password_input")
         correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")
         
         if admin_password == correct_password:
             st.success("✅ Admin access granted")
             
-            # Upload new documents
-            st.subheader("📤 Upload Documents")
-            
-            # Dynamic file types based on available libraries
-            allowed_types = ['txt']
-            if PDF_AVAILABLE:
-                allowed_types.append('pdf')
-            if DOCX_AVAILABLE:
-                allowed_types.append('docx')
-            
-            uploaded_files = st.file_uploader(
-                f"Upload documents ({', '.join(t.upper() for t in allowed_types)}):",
-                type=allowed_types,
-                accept_multiple_files=True,
-                key="document_uploader",
-                help=f"Supported formats: {', '.join(t.upper() for t in allowed_types)}"
-            )
-            
-            # Manual text input option
-            st.subheader("✍️ Add Document Manually")
-            manual_doc_name = st.text_input("Document name:", placeholder="e.g., company-policy.txt", key="manual_doc_name")
-            manual_doc_content = st.text_area(
-                "Document content:", 
-                height=200,
-                placeholder="Paste your document content here...",
-                key="manual_doc_content"
-            )
-            
-            if st.button("💾 Save Manual Document", type="secondary", key="save_manual_doc") and manual_doc_name and manual_doc_content:
-                try:
-                    # Ensure .txt extension
-                    if not manual_doc_name.endswith('.txt'):
-                        manual_doc_name += '.txt'
-                    
-                    # Save manual content to file
-                    file_path = os.path.join("knowledge_base", manual_doc_name)
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(manual_doc_content)
-                    st.success(f"✅ {manual_doc_name} saved successfully!")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error saving {manual_doc_name}: {str(e)}")
-            
-            if uploaded_files:
-                if st.button("💾 Save Uploaded Documents", type="primary", key="save_uploaded_docs"):
-                    for uploaded_file in uploaded_files:
-                        try:
-                            # Save file to knowledge_base folder
-                            file_path = os.path.join("knowledge_base", uploaded_file.name)
-                            with open(file_path, "wb") as f:
-                                f.write(uploaded_file.getbuffer())
-                            st.success(f"✅ {uploaded_file.name} saved successfully!")
-                        except Exception as e:
-                            st.error(f"❌ Error saving {uploaded_file.name}: {str(e)}")
-                    
-                    # Clear cache to reload documents
-                    st.cache_data.clear()
-                    st.rerun()
-            
-            # Manage existing documents
             if knowledge_base:
-                st.subheader("🗑️ Manage Documents")
+                st.subheader("📄 SharePoint Documents")
                 for idx, doc in enumerate(knowledge_base):
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.write(f"📄 {doc['name']}")
-                    with col2:
-                        if st.button("🗑️", key=f"delete_doc_{idx}", help=f"Delete {doc['name']}"):
-                            try:
-                                os.remove(doc['path'])
-                                st.success(f"✅ {doc['name']} deleted")
-                                st.cache_data.clear()
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ Error deleting {doc['name']}: {str(e)}")
-        
+                    with st.expander(f"📄 {doc['name']}"):
+                        st.write(f"**File:** {doc['name']}")
+                        st.write(f"**Source:** SharePoint")
+                        st.write(f"**Size:** {doc.get('size', 'Unknown')} bytes")
+                        st.write(f"**Modified:** {doc.get('modified', 'Unknown')}")
+                        preview_text = doc['content'][:200] + "..." if len(doc['content']) > 200 else doc['content']
+                        st.text_area("Content preview:", preview_text, height=100, disabled=True, key=f"admin_preview_{idx}")
+            
+            st.divider()
+            
+            st.subheader("⚙️ SharePoint Configuration Status")
+            
+            # Show configuration status
+            config_items = [
+                ("MS_TENANT_ID", "Azure Tenant ID"),
+                ("MS_CLIENT_ID", "App Registration Client ID"), 
+                ("MS_CLIENT_SECRET", "App Registration Secret"),
+                ("SHAREPOINT_SITE_URL", "SharePoint Site URL")
+            ]
+            
+            for env_var, description in config_items:
+                value = os.getenv(env_var)
+                if value:
+                    st.success(f"✅ {description}: Configured")
+                else:
+                    st.error(f"❌ {description}: Missing")
+            
+            st.divider()
+            
+            st.subheader("📋 Quick Reference")
+            st.code('''
+# Add these to your Streamlit secrets:
+MS_TENANT_ID = "your-azure-tenant-id"
+MS_CLIENT_ID = "your-app-registration-client-id"  
+MS_CLIENT_SECRET = "your-app-registration-secret"
+SHAREPOINT_SITE_URL = "yourcompany.sharepoint.com/sites/yoursite"
+
+# Azure OpenAI (existing)
+AZURE_OPENAI_API_KEY = "your-key"
+AZURE_OPENAI_ENDPOINT = "your-endpoint"
+AZURE_OPENAI_DEPLOYMENT_NAME = "gpt-4.1-mini"
+ADMIN_PASSWORD = "your-admin-password"
+            ''', language="toml")
+            
         elif admin_password:
             st.error("❌ Incorrect password")
         else:
-            st.info("🔐 Enter admin password to manage documents")
+            st.info("🔐 Enter admin password for configuration status")
     
     st.divider()
     
@@ -333,8 +318,8 @@ with col2:
             key="export_chat_button"
         )
 
-# Chat input (MUST be outside columns and have unique key)
-user_input = st.chat_input("Ask me anything - I have access to the knowledge base...", key="main_chat_input")
+# Chat input
+user_input = st.chat_input("Ask me anything about our company documents...", key="main_chat_input")
 
 if user_input:
     # Add user message
@@ -346,19 +331,14 @@ if user_input:
     # Generate assistant response
     if not AZURE_OPENAI_AVAILABLE:
         with st.chat_message("assistant"):
-            st.error("❌ Azure OpenAI library is not available. Cannot generate responses.")
-            st.info("💡 Make sure the OpenAI library is installed and Azure OpenAI credentials are configured.")
+            st.error("❌ Azure OpenAI library is not available.")
     else:
         try:
             api_key = os.getenv("AZURE_OPENAI_API_KEY")
             endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
             if not api_key or not endpoint:
                 with st.chat_message("assistant"):
-                    st.error("❌ Azure OpenAI credentials not found. Please check your configuration.")
-                    if not api_key:
-                        st.error("  • Missing: AZURE_OPENAI_API_KEY")
-                    if not endpoint:
-                        st.error("  • Missing: AZURE_OPENAI_ENDPOINT")
+                    st.error("❌ Azure OpenAI credentials not configured.")
             else:
                 with st.chat_message("assistant"):
                     placeholder = st.empty()
@@ -375,18 +355,18 @@ if user_input:
                     # System message with knowledge base
                     system_message = {
                         "role": "system", 
-                        "content": f"""You are a helpful AI assistant with access to a knowledge base. 
+                        "content": f"""You are a helpful AI assistant with access to company documents from SharePoint. 
 
-{f"KNOWLEDGE BASE:\\n{knowledge_context}" if knowledge_context else "You don't currently have access to any knowledge base documents."}
+{f"COMPANY KNOWLEDGE BASE (from SharePoint):\n{knowledge_context}" if knowledge_context else "You don't currently have access to any company documents from SharePoint."}
 
 When answering questions:
-1. First check if the answer can be found in the knowledge base documents
+1. First check if the answer can be found in the company documents
 2. If found, provide the answer and mention which document it came from
-3. If not in the knowledge base, provide a helpful general answer
-4. Be accurate and cite your sources when using the knowledge base
+3. If not in the company knowledge base, provide a helpful general answer
+4. Be accurate and cite your sources when using company information
 5. If you're unsure, say so rather than guessing
 
-Please provide helpful, accurate responses."""
+Please provide helpful, accurate responses based on company SharePoint documents when available."""
                     }
                     
                     messages_for_api = [system_message] + st.session_state.messages
@@ -402,7 +382,6 @@ Please provide helpful, accurate responses."""
                         try:
                             # Stream the response with better error handling
                             for chunk in stream:
-                                # Check if chunk has choices and content
                                 if (hasattr(chunk, 'choices') and 
                                     len(chunk.choices) > 0 and 
                                     hasattr(chunk.choices[0], 'delta') and
@@ -431,13 +410,11 @@ Please provide helpful, accurate responses."""
             with st.chat_message("assistant"):
                 st.error(f"❌ Unexpected error: {str(e)}")
 
-# Information panel (remove - status now in sidebar)
-
 # Footer
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: gray; font-size: 0.8em;'>"
-    f"Knowledge Base Chatbot • {len(knowledge_base)} documents loaded • Azure OpenAI {'✅' if AZURE_OPENAI_AVAILABLE else '❌'}"
+    f"SharePoint Knowledge Base Chatbot • {len(knowledge_base)} documents • Live Integration"
     "</div>", 
     unsafe_allow_html=True
 )
