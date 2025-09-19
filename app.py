@@ -1,11 +1,20 @@
 import os
 import json
 import streamlit as st
-from openai import OpenAI
 from datetime import datetime
 import PyPDF2
 from docx import Document
 import glob
+
+# Try importing OpenAI with both old and new versions
+try:
+    from openai import OpenAI  # New version (1.x)
+    USE_NEW_OPENAI = True
+    st.write("✅ Using OpenAI v1.x (new version)")
+except ImportError:
+    import openai  # Old version (0.x)
+    USE_NEW_OPENAI = False
+    st.write("✅ Using OpenAI v0.x (legacy version)")
 
 # Page config
 st.set_page_config(
@@ -73,6 +82,31 @@ def load_knowledge_base():
     
     return documents
 
+def call_openai_api(messages):
+    """Call OpenAI API with compatibility for both old and new versions"""
+    api_key = os.getenv("OPENAI_API_KEY")
+    
+    if USE_NEW_OPENAI:
+        # New OpenAI v1.x
+        client = OpenAI(api_key=api_key)
+        return client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            stream=True,
+            temperature=0.7,
+            max_tokens=2000
+        )
+    else:
+        # Old OpenAI v0.x
+        openai.api_key = api_key
+        return openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            stream=True,
+            temperature=0.7,
+            max_tokens=2000
+        )
+
 # Initialize session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -105,7 +139,7 @@ with st.sidebar:
         
         # Admin password check
         admin_password = st.text_input("Admin Password:", type="password", key="admin_pass")
-        correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")  # Set this in Streamlit secrets!
+        correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")
         
         if admin_password == correct_password:
             st.success("✅ Admin access granted")
@@ -188,8 +222,6 @@ with col1:
             if not api_key:
                 st.error("❌ OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
             else:
-                client = OpenAI(api_key=api_key)
-                
                 with st.chat_message("assistant"):
                     placeholder = st.empty()
                     full_response = ""
@@ -222,21 +254,23 @@ Please provide helpful, accurate responses."""
                     messages_for_api = [system_message] + st.session_state.messages
                     
                     try:
-                        # Create streaming response
-                        stream = client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=messages_for_api,
-                            stream=True,
-                            temperature=0.7,
-                            max_tokens=2000
-                        )
+                        # Call OpenAI API (compatible with both versions)
+                        stream = call_openai_api(messages_for_api)
                         
-                        # Stream the response
+                        # Stream the response (works with both old and new versions)
                         for chunk in stream:
-                            if chunk.choices[0].delta.content is not None:
-                                delta = chunk.choices[0].delta.content
-                                full_response += delta
-                                placeholder.markdown(full_response + "▌")
+                            if USE_NEW_OPENAI:
+                                # New version
+                                if chunk.choices[0].delta.content is not None:
+                                    delta = chunk.choices[0].delta.content
+                                    full_response += delta
+                                    placeholder.markdown(full_response + "▌")
+                            else:
+                                # Old version
+                                if chunk.choices[0].get('delta', {}).get('content'):
+                                    delta = chunk.choices[0]['delta']['content']
+                                    full_response += delta
+                                    placeholder.markdown(full_response + "▌")
                         
                         # Final response without cursor
                         placeholder.markdown(full_response)
@@ -284,7 +318,7 @@ else:
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: gray; font-size: 0.8em;'>"
-    f"Knowledge Base Chatbot • {len(knowledge_base)} documents loaded"
+    f"Knowledge Base Chatbot • {len(knowledge_base)} documents loaded • OpenAI {'v1.x' if USE_NEW_OPENAI else 'v0.x'}"
     "</div>", 
     unsafe_allow_html=True
 )
