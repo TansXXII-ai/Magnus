@@ -281,96 +281,6 @@ with col1:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Chat input
-    if prompt := st.chat_input("Ask me anything - I have access to the knowledge base..."):
-        # Add user message
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        # Generate assistant response
-        if not USE_NEW_OPENAI and not openai:
-            st.error("❌ OpenAI library is not available. Cannot generate responses.")
-            st.info("💡 This is likely due to package installation issues on the hosting platform.")
-        else:
-            try:
-                api_key = os.getenv("OPENAI_API_KEY")
-                if not api_key:
-                    st.error("❌ OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
-                else:
-                    with st.chat_message("assistant"):
-                        placeholder = st.empty()
-                        full_response = ""
-                        
-                        # Prepare knowledge base context
-                        knowledge_context = ""
-                        if knowledge_base:
-                            knowledge_context = "\n\n".join([
-                                f"Document: {doc['name']}\n{doc['content']}" 
-                                for doc in knowledge_base
-                            ])
-                        
-                        # System message with knowledge base
-                        system_message = {
-                            "role": "system", 
-                            "content": f"""You are a helpful AI assistant with access to a knowledge base. 
-
-{f"KNOWLEDGE BASE:\\n{knowledge_context}" if knowledge_context else "You don't currently have access to any knowledge base documents."}
-
-When answering questions:
-1. First check if the answer can be found in the knowledge base documents
-2. If found, provide the answer and mention which document it came from
-3. If not in the knowledge base, provide a helpful general answer
-4. Be accurate and cite your sources when using the knowledge base
-5. If you're unsure, say so rather than guessing
-
-Please provide helpful, accurate responses."""
-                        }
-                        
-                        messages_for_api = [system_message] + st.session_state.messages
-                        
-                        # Call OpenAI API (compatible with both versions)
-                        stream, error = call_openai_api(messages_for_api)
-                        
-                        if error:
-                            error_msg = f"❌ API Error: {error}"
-                            st.error(error_msg)
-                            placeholder.markdown(error_msg)
-                        elif stream:
-                            try:
-                                # Stream the response (works with both old and new versions)
-                                for chunk in stream:
-                                    if USE_NEW_OPENAI:
-                                        # New version
-                                        if chunk.choices[0].delta.content is not None:
-                                            delta = chunk.choices[0].delta.content
-                                            full_response += delta
-                                            placeholder.markdown(full_response + "▌")
-                                    else:
-                                        # Old version
-                                        if chunk.choices[0].get('delta', {}).get('content'):
-                                            delta = chunk.choices[0]['delta']['content']
-                                            full_response += delta
-                                            placeholder.markdown(full_response + "▌")
-                                
-                                # Final response without cursor
-                                placeholder.markdown(full_response)
-                                
-                                # Add to message history
-                                st.session_state.messages.append({
-                                    "role": "assistant", 
-                                    "content": full_response
-                                })
-                                
-                            except Exception as e:
-                                error_msg = f"❌ Streaming Error: {str(e)}"
-                                st.error(error_msg)
-                                placeholder.markdown(error_msg)
-            
-            except Exception as e:
-                st.error(f"❌ Unexpected error: {str(e)}")
-
 with col2:
     # Export functionality
     if st.session_state.messages:
@@ -389,6 +299,104 @@ with col2:
             mime="application/json",
             help="Download conversation history"
         )
+
+# Chat input (MUST be outside columns)
+if prompt := st.chat_input("Ask me anything - I have access to the knowledge base..."):
+        # Add user message
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+# Chat input (MUST be outside columns)
+if prompt := st.chat_input("Ask me anything - I have access to the knowledge base..."):
+    # Add user message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    # Generate assistant response
+    if not USE_NEW_OPENAI and not openai:
+        st.error("❌ OpenAI library is not available. Cannot generate responses.")
+        st.info("💡 This is likely due to package installation issues on the hosting platform.")
+    else:
+        try:
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                st.error("❌ OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
+            else:
+                with st.chat_message("assistant"):
+                    placeholder = st.empty()
+                    full_response = ""
+                    
+                    # Prepare knowledge base context
+                    knowledge_context = ""
+                    if knowledge_base:
+                        knowledge_context = "\n\n".join([
+                            f"Document: {doc['name']}\n{doc['content']}" 
+                            for doc in knowledge_base
+                        ])
+                    
+                    # System message with knowledge base
+                    system_message = {
+                        "role": "system", 
+                        "content": f"""You are a helpful AI assistant with access to a knowledge base. 
+
+{f"KNOWLEDGE BASE:\\n{knowledge_context}" if knowledge_context else "You don't currently have access to any knowledge base documents."}
+
+When answering questions:
+1. First check if the answer can be found in the knowledge base documents
+2. If found, provide the answer and mention which document it came from
+3. If not in the knowledge base, provide a helpful general answer
+4. Be accurate and cite your sources when using the knowledge base
+5. If you're unsure, say so rather than guessing
+
+Please provide helpful, accurate responses."""
+                    }
+                    
+                    messages_for_api = [system_message] + st.session_state.messages
+                    
+                    # Call OpenAI API (compatible with both versions)
+                    stream, error = call_openai_api(messages_for_api)
+                    
+                    if error:
+                        error_msg = f"❌ API Error: {error}"
+                        st.error(error_msg)
+                        placeholder.markdown(error_msg)
+                    elif stream:
+                        try:
+                            # Stream the response (works with both old and new versions)
+                            for chunk in stream:
+                                if USE_NEW_OPENAI:
+                                    # New version
+                                    if chunk.choices[0].delta.content is not None:
+                                        delta = chunk.choices[0].delta.content
+                                        full_response += delta
+                                        placeholder.markdown(full_response + "▌")
+                                else:
+                                    # Old version
+                                    if chunk.choices[0].get('delta', {}).get('content'):
+                                        delta = chunk.choices[0]['delta']['content']
+                                        full_response += delta
+                                        placeholder.markdown(full_response + "▌")
+                            
+                            # Final response without cursor
+                            placeholder.markdown(full_response)
+                            
+                            # Add to message history
+                            st.session_state.messages.append({
+                                "role": "assistant", 
+                                "content": full_response
+                            })
+                            
+                        except Exception as e:
+                            error_msg = f"❌ Streaming Error: {str(e)}"
+                            st.error(error_msg)
+                            placeholder.markdown(error_msg)
+        
+        except Exception as e:
+            st.error(f"❌ Unexpected error: {str(e)}")
 
 # Information panel
 if not knowledge_base:
