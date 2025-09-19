@@ -2,7 +2,6 @@ import os
 import json
 import streamlit as st
 from datetime import datetime
-import pypdf
 from docx import Document
 import glob
 
@@ -30,6 +29,9 @@ if USE_NEW_OPENAI:
 else:
     st.info("ℹ️ Using OpenAI v0.x (legacy version)")
 
+# Temporary notice about PDF support
+st.info("📝 **Note:** Currently supports TXT and DOCX files. PDF support will be added once the core app is stable.")
+
 # Ensure knowledge_base directory exists
 os.makedirs("knowledge_base", exist_ok=True)
 
@@ -43,9 +45,8 @@ def load_knowledge_base():
     if not os.path.exists(knowledge_base_path):
         return []
     
-    # Supported file types
+    # Supported file types (PDF support temporarily disabled)
     file_patterns = [
-        f"{knowledge_base_path}/*.pdf",
         f"{knowledge_base_path}/*.txt",
         f"{knowledge_base_path}/*.docx"
     ]
@@ -56,14 +57,7 @@ def load_knowledge_base():
                 filename = os.path.basename(file_path)
                 text_content = ""
                 
-                if file_path.endswith('.pdf'):
-                    # PDF processing
-                    with open(file_path, 'rb') as file:
-                        pdf_reader = pypdf.PdfReader(file)
-                        for page in pdf_reader.pages:
-                            text_content += page.extract_text() + "\n"
-                
-                elif file_path.endswith('.txt'):
+                if file_path.endswith('.txt'):
                     # Plain text
                     with open(file_path, 'r', encoding='utf-8') as file:
                         text_content = file.read()
@@ -134,6 +128,12 @@ with st.sidebar:
                     st.text_area("Content preview:", preview_text, height=100, disabled=True)
     else:
         st.info("📁 No documents found in knowledge base")
+        st.markdown("""
+        **To add documents:**
+        1. Create a `knowledge_base` folder
+        2. Add your TXT or DOCX files (PDF coming soon)
+        3. Restart the app
+        """)
     
     st.divider()
     
@@ -152,9 +152,10 @@ with st.sidebar:
             st.subheader("📤 Upload Documents")
             uploaded_files = st.file_uploader(
                 "Upload knowledge base documents:",
-                type=['pdf', 'txt', 'docx'],
+                type=['txt', 'docx'],
                 accept_multiple_files=True,
-                key="admin_upload"
+                key="admin_upload",
+                help="Supported: TXT, DOCX (PDF support coming soon)"
             )
             
             if uploaded_files:
@@ -315,6 +316,7 @@ with col2:
 # Information panel
 if not knowledge_base:
     st.warning("⚠️ **Knowledge base is empty.** Use the Admin Panel in the sidebar to upload your documents securely.")
+    st.info("📝 **Currently supported:** TXT and DOCX files. PDF support will be added once the app is stable.")
 else:
     st.info(f"💡 **I have access to {len(knowledge_base)} documents** and can answer questions about them!")
 
