@@ -3,14 +3,7 @@ import json
 import streamlit as st
 from datetime import datetime
 import glob
-
-# Try importing OpenAI with both old and new versions
-try:
-    from openai import OpenAI  # New version (1.x)
-    USE_NEW_OPENAI = True
-except ImportError:
-    import openai  # Old version (0.x)
-    USE_NEW_OPENAI = False
+import sys
 
 # Page config
 st.set_page_config(
@@ -19,17 +12,64 @@ st.set_page_config(
     layout="wide"
 )
 
+# Debug: Show Python version and installed packages
+st.write("🐍 Python version:", sys.version)
+
+# Try importing OpenAI with detailed error handling
+openai_status = "❌ Not available"
+USE_NEW_OPENAI = False
+openai_client = None
+openai = None
+
+try:
+    from openai import OpenAI
+    USE_NEW_OPENAI = True
+    openai_status = "✅ New OpenAI (v1.x) imported successfully"
+except ImportError as e1:
+    try:
+        import openai
+        USE_NEW_OPENAI = False
+        openai_status = "✅ Old OpenAI (v0.x) imported successfully"
+    except ImportError as e2:
+        openai_status = f"❌ OpenAI import failed. New version error: {e1}. Old version error: {e2}"
+
+st.write("🤖 OpenAI Status:", openai_status)
+
 # Title
 st.title("🤖 Knowledge Base Chatbot")
 
-# Debug info - show which OpenAI version we're using
+# Debug section
+with st.expander("🔍 Debug Information"):
+    st.write("🐍 Python version:", sys.version)
+    st.write("🤖 OpenAI Status:", openai_status)
+    
+    # Show installed packages
+    try:
+        import pkg_resources
+        installed_packages = [d.project_name + "==" + d.version for d in pkg_resources.working_set]
+        st.write("📦 Installed packages:")
+        for pkg in sorted(installed_packages)[:10]:  # Show first 10
+            st.write(f"  • {pkg}")
+        if len(installed_packages) > 10:
+            st.write(f"  ... and {len(installed_packages) - 10} more")
+    except:
+        st.write("📦 Could not retrieve package information")
+
+# Show main status
 if USE_NEW_OPENAI:
     st.success("✅ Using OpenAI v1.x (new version)")
-else:
+elif openai:
     st.info("ℹ️ Using OpenAI v0.x (legacy version)")
+else:
+    st.error("❌ OpenAI library is not available")
+    st.warning("⚠️ **Issue:** The OpenAI package is not installed on this hosting platform.")
+    st.info("🛠️ **Possible solutions:**\n1. Try different hosting (Railway, Render)\n2. Contact Streamlit support\n3. Use a different requirements.txt format")
 
 # Notice about file support
-st.info("📝 **Simple & Reliable:** Currently supports plain text files (.txt) and manual content input for maximum compatibility.")
+if USE_NEW_OPENAI or openai:
+    st.info("📝 **Simple & Reliable:** Currently supports plain text files (.txt) and manual content input for maximum compatibility.")
+else:
+    st.info("📝 **Knowledge base features available** but AI responses disabled due to missing OpenAI package.")
 
 # Ensure knowledge_base directory exists
 os.makedirs("knowledge_base", exist_ok=True)
@@ -76,26 +116,37 @@ def call_openai_api(messages):
     """Call OpenAI API with compatibility for both old and new versions"""
     api_key = os.getenv("OPENAI_API_KEY")
     
+    if not api_key:
+        return None, "No API key found"
+    
     if USE_NEW_OPENAI:
         # New OpenAI v1.x
-        client = OpenAI(api_key=api_key)
-        return client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            stream=True,
-            temperature=0.7,
-            max_tokens=2000
-        )
-    else:
+        try:
+            client = OpenAI(api_key=api_key)
+            return client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                stream=True,
+                temperature=0.7,
+                max_tokens=2000
+            ), None
+        except Exception as e:
+            return None, f"New OpenAI API error: {str(e)}"
+    elif openai:
         # Old OpenAI v0.x
-        openai.api_key = api_key
-        return openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            stream=True,
-            temperature=0.7,
-            max_tokens=2000
-        )
+        try:
+            openai.api_key = api_key
+            return openai.ChatCompletion.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                stream=True,
+                temperature=0.7,
+                max_tokens=2000
+            ), None
+        except Exception as e:
+            return None, f"Old OpenAI API error: {str(e)}"
+    else:
+        return None, "OpenAI library not available"
 
 # Initialize session state
 if "messages" not in st.session_state:
@@ -135,7 +186,7 @@ with st.sidebar:
         
         # Admin password check
         admin_password = st.text_input("Admin Password:", type="password", key="admin_pass")
-        correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")  # Set this in Streamlit secrets!
+        correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")
         
         if admin_password == correct_password:
             st.success("✅ Admin access granted")
@@ -239,27 +290,31 @@ with col1:
             st.markdown(prompt)
         
         # Generate assistant response
-        try:
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                st.error("❌ OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
-            else:
-                with st.chat_message("assistant"):
-                    placeholder = st.empty()
-                    full_response = ""
-                    
-                    # Prepare knowledge base context
-                    knowledge_context = ""
-                    if knowledge_base:
-                        knowledge_context = "\n\n".join([
-                            f"Document: {doc['name']}\n{doc['content']}" 
-                            for doc in knowledge_base
-                        ])
-                    
-                    # System message with knowledge base
-                    system_message = {
-                        "role": "system", 
-                        "content": f"""You are a helpful AI assistant with access to a knowledge base. 
+        if not USE_NEW_OPENAI and not openai:
+            st.error("❌ OpenAI library is not available. Cannot generate responses.")
+            st.info("💡 This is likely due to package installation issues on the hosting platform.")
+        else:
+            try:
+                api_key = os.getenv("OPENAI_API_KEY")
+                if not api_key:
+                    st.error("❌ OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
+                else:
+                    with st.chat_message("assistant"):
+                        placeholder = st.empty()
+                        full_response = ""
+                        
+                        # Prepare knowledge base context
+                        knowledge_context = ""
+                        if knowledge_base:
+                            knowledge_context = "\n\n".join([
+                                f"Document: {doc['name']}\n{doc['content']}" 
+                                for doc in knowledge_base
+                            ])
+                        
+                        # System message with knowledge base
+                        system_message = {
+                            "role": "system", 
+                            "content": f"""You are a helpful AI assistant with access to a knowledge base. 
 
 {f"KNOWLEDGE BASE:\\n{knowledge_context}" if knowledge_context else "You don't currently have access to any knowledge base documents."}
 
@@ -271,45 +326,50 @@ When answering questions:
 5. If you're unsure, say so rather than guessing
 
 Please provide helpful, accurate responses."""
-                    }
-                    
-                    messages_for_api = [system_message] + st.session_state.messages
-                    
-                    try:
+                        }
+                        
+                        messages_for_api = [system_message] + st.session_state.messages
+                        
                         # Call OpenAI API (compatible with both versions)
-                        stream = call_openai_api(messages_for_api)
+                        stream, error = call_openai_api(messages_for_api)
                         
-                        # Stream the response (works with both old and new versions)
-                        for chunk in stream:
-                            if USE_NEW_OPENAI:
-                                # New version
-                                if chunk.choices[0].delta.content is not None:
-                                    delta = chunk.choices[0].delta.content
-                                    full_response += delta
-                                    placeholder.markdown(full_response + "▌")
-                            else:
-                                # Old version
-                                if chunk.choices[0].get('delta', {}).get('content'):
-                                    delta = chunk.choices[0]['delta']['content']
-                                    full_response += delta
-                                    placeholder.markdown(full_response + "▌")
-                        
-                        # Final response without cursor
-                        placeholder.markdown(full_response)
-                        
-                        # Add to message history
-                        st.session_state.messages.append({
-                            "role": "assistant", 
-                            "content": full_response
-                        })
-                    
-                    except Exception as e:
-                        error_msg = f"❌ API Error: {str(e)}"
-                        st.error(error_msg)
-                        placeholder.markdown(error_msg)
-        
-        except Exception as e:
-            st.error(f"❌ Unexpected error: {str(e)}")
+                        if error:
+                            error_msg = f"❌ API Error: {error}"
+                            st.error(error_msg)
+                            placeholder.markdown(error_msg)
+                        elif stream:
+                            try:
+                                # Stream the response (works with both old and new versions)
+                                for chunk in stream:
+                                    if USE_NEW_OPENAI:
+                                        # New version
+                                        if chunk.choices[0].delta.content is not None:
+                                            delta = chunk.choices[0].delta.content
+                                            full_response += delta
+                                            placeholder.markdown(full_response + "▌")
+                                    else:
+                                        # Old version
+                                        if chunk.choices[0].get('delta', {}).get('content'):
+                                            delta = chunk.choices[0]['delta']['content']
+                                            full_response += delta
+                                            placeholder.markdown(full_response + "▌")
+                                
+                                # Final response without cursor
+                                placeholder.markdown(full_response)
+                                
+                                # Add to message history
+                                st.session_state.messages.append({
+                                    "role": "assistant", 
+                                    "content": full_response
+                                })
+                                
+                            except Exception as e:
+                                error_msg = f"❌ Streaming Error: {str(e)}"
+                                st.error(error_msg)
+                                placeholder.markdown(error_msg)
+            
+            except Exception as e:
+                st.error(f"❌ Unexpected error: {str(e)}")
 
 with col2:
     # Export functionality
@@ -341,7 +401,7 @@ else:
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: gray; font-size: 0.8em;'>"
-    f"Knowledge Base Chatbot • {len(knowledge_base)} documents loaded • OpenAI {'v1.x' if USE_NEW_OPENAI else 'v0.x'}"
+    f"Knowledge Base Chatbot • {len(knowledge_base)} documents loaded • OpenAI {'v1.x' if USE_NEW_OPENAI else 'v0.x' if openai else 'unavailable'}"
     "</div>", 
     unsafe_allow_html=True
 )
