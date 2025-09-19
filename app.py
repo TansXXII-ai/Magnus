@@ -5,7 +5,7 @@ from datetime import datetime
 
 # Page config
 st.set_page_config(
-    page_title="Knowledge Base Chatbot", 
+    page_title="MAGnus - MA Groups Knowledge Bot", 
     page_icon="🤖",
     layout="wide"
 )
@@ -462,3 +462,4 @@ st.markdown(
     "</div>", 
     unsafe_allow_html=True
 )
+
