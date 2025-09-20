@@ -57,8 +57,22 @@ if "knowledge_base" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+if "conversation_state" not in st.session_state:
+    st.session_state.conversation_state = "initial"  # initial, categorized, waiting_for_issue, waiting_for_problem
+
+if "current_category" not in st.session_state:
+    st.session_state.current_category = None
+
 # Login function
 def show_login():
+    # Add logo to login page
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        try:
+            st.image("MAGNUS AI Logo Design.png", width=150)
+        except:
+            pass
+    
     st.title("🔐 MAGnus Knowledge Bot - Login")
     
     st.markdown("""
@@ -82,14 +96,87 @@ def show_login():
             
             if username == correct_username and password == correct_password:
                 st.session_state.authenticated = True
-                st.success("Login successful! Redirecting...")
+                st.session_state.loading_complete = False  # Reset loading state
+                st.success("Login successful! Loading knowledge base...")
                 st.rerun()
             else:
                 st.error("Invalid username or password. Please try again.")
 
+# Loading function
+def show_loading():
+    # Add logo to loading page
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        try:
+            st.image("MAGNUS AI Logo Design.png", width=150)
+        except:
+            pass
+    
+    st.title("🤖 MAGnus Knowledge Bot")
+    
+    # Loading indicators
+    st.markdown("### 📚 Loading Knowledge Base")
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # Load knowledge base with progress updates
+    status_text.text("Connecting to Dropbox...")
+    progress_bar.progress(20)
+    
+    # Initialize Dropbox connector
+    connector = get_dropbox_connector()
+    
+    status_text.text("Fetching document list...")
+    progress_bar.progress(40)
+    
+    # Check credentials
+    access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
+    if not access_token:
+        st.error("❌ Dropbox access token not configured")
+        return
+    
+    status_text.text("Processing documents...")
+    progress_bar.progress(60)
+    
+    try:
+        # Load documents
+        documents = connector.get_documents()
+        st.session_state.knowledge_base = documents
+        
+        progress_bar.progress(80)
+        status_text.text("Finalizing setup...")
+        
+        progress_bar.progress(100)
+        status_text.text(f"✅ Loaded {len(documents)} documents successfully!")
+        
+        # Mark loading as complete
+        st.session_state.loading_complete = True
+        
+        # Small delay to show completion
+        import time
+        time.sleep(1)
+        
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"❌ Error loading documents: {str(e)}")
+        st.info("Please check your Dropbox configuration and try again.")
+        
+        # Option to retry or logout
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Retry"):
+                st.rerun()
+        with col2:
+            if st.button("🚪 Logout"):
+                logout()
+
 # Logout function
 def logout():
     st.session_state.authenticated = False
+    st.session_state.loading_complete = False
+    st.session_state.knowledge_base = []
     st.session_state.messages = []  # Clear chat history on logout
     st.rerun()
 
@@ -289,8 +376,8 @@ def show_main_app():
         except Exception as e:
             return None, f"Azure OpenAI API error: {str(e)}"
 
-    # Load knowledge base
-    knowledge_base = load_knowledge_base()
+    # Load knowledge base from session state (already loaded during login)
+    knowledge_base = st.session_state.knowledge_base
 
     # Sidebar
     with st.sidebar:
@@ -323,7 +410,9 @@ def show_main_app():
             
             # Show refresh button
             if st.button("🔄 Refresh Documents", key="refresh_docs"):
-                st.cache_data.clear()
+                # Clear session state and reload
+                st.session_state.knowledge_base = []
+                st.session_state.loading_complete = False
                 st.rerun()
             
             # Show last update time
@@ -331,10 +420,7 @@ def show_main_app():
             
         else:
             st.warning("⚠️ No Dropbox documents found")
-            if dropbox_token:
-                st.info("Check Dropbox folder and file permissions")
-            else:
-                st.info("Configure Dropbox access token in secrets")
+            st.info("Check Dropbox folder and file permissions")
         
         st.divider()
         
@@ -409,6 +495,16 @@ ADMIN_PASSWORD = "your-admin-password"
         if st.session_state.messages:
             if st.button("🗑️ Clear Chat", type="secondary", key="clear_chat_button"):
                 st.session_state.messages = []
+                st.session_state.conversation_state = "initial"
+                st.session_state.current_category = None
+                st.rerun()
+
+        # Show conversation restart option
+        if st.session_state.conversation_state != "initial":
+            if st.button("🔄 Start New Conversation", key="restart_conversation"):
+                st.session_state.messages = []
+                st.session_state.conversation_state = "initial"
+                st.session_state.current_category = None
                 st.rerun()
 
     # Main chat area
@@ -440,8 +536,17 @@ ADMIN_PASSWORD = "your-admin-password"
                 key="export_chat_button"
             )
 
-    # Chat input
-    user_input = st.chat_input("Ask me anything about our company documents...", key="main_chat_input")
+    # Chat input with dynamic placeholder
+    if st.session_state.conversation_state == "initial":
+        placeholder_text = "Hello! How can I help you today?"
+    elif st.session_state.conversation_state == "waiting_for_issue":
+        placeholder_text = "Please describe your issue in detail..."
+    elif st.session_state.conversation_state == "waiting_for_problem":
+        placeholder_text = "Please describe your problem in detail..."
+    else:
+        placeholder_text = "Type your question here..."
+        
+    user_input = st.chat_input(placeholder_text, key="main_chat_input")
 
     if user_input:
         # Add user message
@@ -450,90 +555,196 @@ ADMIN_PASSWORD = "your-admin-password"
         with st.chat_message("user"):
             st.markdown(user_input)
         
-        # Generate assistant response
-        if not AZURE_OPENAI_AVAILABLE:
+        # Handle different conversation states
+        if st.session_state.conversation_state == "initial":
+            # Show initial categorization
             with st.chat_message("assistant"):
-                st.error("❌ Azure OpenAI library is not available.")
-        else:
-            try:
-                api_key = os.getenv("AZURE_OPENAI_API_KEY")
-                endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-                if not api_key or not endpoint:
-                    with st.chat_message("assistant"):
-                        st.error("❌ Azure OpenAI credentials not configured.")
+                response = """I'm here to help! To provide you with the best assistance, please let me know what type of request this is:
+
+🤔 **Question** - I need information or guidance
+🔄 **Change** - I want to suggest an improvement or new feature  
+⚠️ **Issue** - Something isn't working as expected
+🔧 **Problem** - I'm experiencing a technical difficulty
+
+Please type one of these options: **Question**, **Change**, **Issue**, or **Problem**"""
+                
+                st.markdown(response)
+                st.session_state.messages.append({"role": "assistant", "content": response})
+                st.session_state.conversation_state = "categorizing"
+        
+        elif st.session_state.conversation_state == "categorizing":
+            # Process categorization
+            user_choice = user_input.lower().strip()
+            
+            with st.chat_message("assistant"):
+                if "question" in user_choice:
+                    st.session_state.current_category = "question"
+                    responses = [
+                        "Great! I'm here to help answer your question. What would you like to know?",
+                        "Perfect! Ask away - I'll search through our company documents to find the answer.",
+                        "Excellent! What can I help you learn about today?",
+                        "Wonderful! I'm ready to help with your question."
+                    ]
+                    import random
+                    response = random.choice(responses)
+                    st.markdown(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    st.session_state.conversation_state = "categorized"
+                
+                elif "change" in user_choice:
+                    st.session_state.current_category = "change"
+                    response = """That's fantastic! We love hearing improvement ideas from our team.
+
+To submit your change request or suggestion, please use our **Innovation Request Form**:
+
+🔗 **[Submit Innovation Request](https://www.jotform.com/form/250841782712054)**
+
+This form ensures your idea gets to the right people and receives proper consideration. Thank you for helping us improve!"""
+                    st.markdown(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    st.session_state.conversation_state = "completed"
+                
+                elif "issue" in user_choice:
+                    st.session_state.current_category = "issue"
+                    response = "I understand you're experiencing an issue. Please describe what's happening in detail, and I'll search our documentation to help resolve it."
+                    st.markdown(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    st.session_state.conversation_state = "waiting_for_issue"
+                
+                elif "problem" in user_choice:
+                    st.session_state.current_category = "problem"
+                    response = "I'm here to help with your problem. Please explain what's going wrong, and I'll look through our resources to find a solution."
+                    st.markdown(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    st.session_state.conversation_state = "waiting_for_problem"
+                
                 else:
-                    with st.chat_message("assistant"):
-                        # Show thinking indicator
-                        with st.spinner("🤔 Thinking and analyzing your question..."):
-                            placeholder = st.empty()
-                            full_response = ""
-                            
-                            # Prepare knowledge base context
-                            knowledge_context = ""
-                            if knowledge_base:
-                                knowledge_context = "\n\n".join([
-                                    f"Document: {doc['name']}\n{doc['content']}" 
-                                    for doc in knowledge_base
-                                ])
-                            
-                            # System message with knowledge base
-                            system_message = {
-                                "role": "system", 
-                                "content": f"""You are a helpful AI assistant with access to company documents from Dropbox. 
+                    response = """I didn't quite catch that. Please choose one of these options:
 
-{f"COMPANY KNOWLEDGE BASE (from Dropbox):\n{knowledge_context}" if knowledge_context else "You don't currently have access to any company documents from Dropbox."}
+• Type **Question** if you need information
+• Type **Change** if you want to suggest an improvement  
+• Type **Issue** if something isn't working
+• Type **Problem** if you're experiencing difficulties"""
+                    st.markdown(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+        
+        elif st.session_state.conversation_state in ["waiting_for_issue", "waiting_for_problem", "categorized"]:
+            # Handle regular document search for questions, issues, and problems
+            if not AZURE_OPENAI_AVAILABLE:
+                with st.chat_message("assistant"):
+                    st.error("AI service is not available.")
+            else:
+                try:
+                    api_key = os.getenv("AZURE_OPENAI_API_KEY")
+                    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+                    if not api_key or not endpoint:
+                        with st.chat_message("assistant"):
+                            st.error("AI service is not configured.")
+                    else:
+                        with st.chat_message("assistant"):
+                            # Show thinking indicator
+                            with st.spinner("🤔 Searching through company documents..."):
+                                placeholder = st.empty()
+                                full_response = ""
+                                
+                                # Prepare knowledge base context
+                                knowledge_context = ""
+                                if knowledge_base:
+                                    knowledge_context = "\n\n".join([
+                                        f"Document: {doc['name']}\n{doc['content']}" 
+                                        for doc in knowledge_base
+                                    ])
+                                
+                                # System message with knowledge base
+                                system_message = {
+                                    "role": "system", 
+                                    "content": f"""You are a company knowledge base assistant. You ONLY provide information that can be found in the company documents provided to you.
 
-When answering questions:
-1. First check if the answer can be found in the company documents
-2. If found, provide the answer and mention which document it came from
-3. If not in the company knowledge base, provide a helpful general answer
-4. Be accurate and cite your sources when using company information
-5. If you're unsure, say so rather than guessing
+{f"COMPANY KNOWLEDGE BASE:\n{knowledge_context}" if knowledge_context else "You don't currently have access to any company documents."}
 
-Please provide helpful, accurate responses based on company Dropbox documents when available."""
-                            }
+IMPORTANT RESTRICTIONS:
+1. ONLY answer questions using information directly found in the company documents above
+2. If the answer is not in the company documents, respond with: "I cannot find that information in our company documents. Please contact your manager or HR for assistance with this question."
+3. Do NOT provide general advice, external information, or assumptions
+4. Do NOT make up information or provide answers based on general knowledge
+5. Always cite which specific document contains the information you're referencing
+6. If a question is partially covered in the documents, only answer the parts that are documented
+
+Your role is to be a reliable source of company-specific information only."""
+                                }
+                                
+                                messages_for_api = [system_message] + st.session_state.messages
+                                
+                                # Call Azure OpenAI API
+                                stream, error = call_openai_api(messages_for_api)
                             
-                            messages_for_api = [system_message] + st.session_state.messages
-                            
-                            # Call Azure OpenAI API
-                            stream, error = call_openai_api(messages_for_api)
-                        
-                        # Clear the thinking indicator and show response
-                        if error:
-                            error_msg = f"❌ API Error: {error}"
-                            st.error(error_msg)
-                            placeholder.markdown(error_msg)
-                        elif stream:
-                            try:
-                                # Stream the response with better error handling
-                                for chunk in stream:
-                                    if (hasattr(chunk, 'choices') and 
-                                        len(chunk.choices) > 0 and 
-                                        hasattr(chunk.choices[0], 'delta') and
-                                        hasattr(chunk.choices[0].delta, 'content') and
-                                        chunk.choices[0].delta.content is not None):
-                                        
-                                        delta = chunk.choices[0].delta.content
-                                        full_response += delta
-                                        placeholder.markdown(full_response + "▌")
-                                
-                                # Final response without cursor
-                                placeholder.markdown(full_response)
-                                
-                                # Add to message history
-                                st.session_state.messages.append({
-                                    "role": "assistant", 
-                                    "content": full_response
-                                })
-                                
-                            except Exception as e:
-                                error_msg = f"❌ Streaming Error: {str(e)}"
+                            # Clear the thinking indicator and show response
+                            if error:
+                                error_msg = f"AI Error: {error}"
                                 st.error(error_msg)
                                 placeholder.markdown(error_msg)
-            
-            except Exception as e:
-                with st.chat_message("assistant"):
-                    st.error(f"❌ Unexpected error: {str(e)}")
+                            elif stream:
+                                try:
+                                    # Stream the response with better error handling
+                                    for chunk in stream:
+                                        if (hasattr(chunk, 'choices') and 
+                                            len(chunk.choices) > 0 and 
+                                            hasattr(chunk.choices[0], 'delta') and
+                                            hasattr(chunk.choices[0].delta, 'content') and
+                                            chunk.choices[0].delta.content is not None):
+                                            
+                                            delta = chunk.choices[0].delta.content
+                                            full_response += delta
+                                            placeholder.markdown(full_response + "▌")
+                                    
+                                    # Final response without cursor
+                                    placeholder.markdown(full_response)
+                                    
+                                    # Add to message history
+                                    st.session_state.messages.append({
+                                        "role": "assistant", 
+                                        "content": full_response
+                                    })
+                                    
+                                    # After providing answer for issues/problems, ask if it helped
+                                    if st.session_state.conversation_state in ["waiting_for_issue", "waiting_for_problem"]:
+                                        if "cannot find that information" not in full_response.lower():
+                                            follow_up = f"\n\n---\n\nDid this information help resolve your {st.session_state.current_category}? If not, you can submit an **[Innovation Request](https://www.jotform.com/form/250841782712054)** to get additional support."
+                                            placeholder.markdown(full_response + follow_up)
+                                            st.session_state.messages[-1]["content"] += follow_up
+                                        else:
+                                            follow_up = f"\n\n---\n\nSince I couldn't find specific information about your {st.session_state.current_category}, I recommend submitting an **[Innovation Request](https://www.jotform.com/form/250841782712054)** to get proper support from our team."
+                                            placeholder.markdown(full_response + follow_up)
+                                            st.session_state.messages[-1]["content"] += follow_up
+                                        
+                                        st.session_state.conversation_state = "completed"
+                                    
+                                except Exception as e:
+                                    error_msg = f"Streaming Error: {str(e)}"
+                                    st.error(error_msg)
+                                    placeholder.markdown(error_msg)
+                
+                except Exception as e:
+                    with st.chat_message("assistant"):
+                        st.error(f"Unexpected error: {str(e)}")
+
+        # Show initial categorization if no messages yet
+        if not st.session_state.messages and st.session_state.conversation_state == "initial":
+            with st.chat_message("assistant"):
+                response = """👋 Welcome to MAGnus Knowledge Bot!
+
+I'm here to help! To provide you with the best assistance, please let me know what type of request this is:
+
+🤔 **Question** - I need information or guidance
+🔄 **Change** - I want to suggest an improvement or new feature  
+⚠️ **Issue** - Something isn't working as expected
+🔧 **Problem** - I'm experiencing a technical difficulty
+
+Please type one of these options: **Question**, **Change**, **Issue**, or **Problem**"""
+                
+                st.markdown(response)
+                st.session_state.messages.append({"role": "assistant", "content": response})
+                st.session_state.conversation_state = "categorizing"
 
     # Footer
     st.markdown("---")
@@ -547,5 +758,7 @@ Please provide helpful, accurate responses based on company Dropbox documents wh
 # Main app logic
 if not st.session_state.authenticated:
     show_login()
+elif not st.session_state.loading_complete:
+    show_loading()
 else:
     show_main_app()
