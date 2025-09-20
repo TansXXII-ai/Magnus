@@ -208,6 +208,31 @@ def load_knowledge_base():
         # Return cached data if available, otherwise show warning
         raise Exception(f"Using cached documents due to error: {str(e)}")
 
+def search_relevant_documents(query, knowledge_base, max_docs=3):
+    """Search for the most relevant documents based on the query"""
+    if not knowledge_base:
+        return []
+    
+    # Simple keyword-based relevance scoring
+    query_words = query.lower().split()
+    scored_docs = []
+    
+    for doc in knowledge_base:
+        content_lower = doc['content'].lower()
+        score = 0
+        
+        # Count keyword matches
+        for word in query_words:
+            if len(word) > 2:  # Skip very short words
+                score += content_lower.count(word)
+        
+        if score > 0:
+            scored_docs.append((score, doc))
+    
+    # Sort by score and return top documents
+    scored_docs.sort(key=lambda x: x[0], reverse=True)
+    return [doc for score, doc in scored_docs[:max_docs]]
+
 def call_openai_api(messages):
     """Call Azure OpenAI API"""
     api_key = os.getenv("AZURE_OPENAI_API_KEY")
@@ -721,7 +746,25 @@ This form ensures your idea gets to the right people and receives proper conside
                     st.session_state.messages.append({"role": "assistant", "content": response})
         
         elif st.session_state.conversation_state in ["waiting_for_issue", "waiting_for_problem", "categorized"]:
-            if not AZURE_OPENAI_AVAILABLE:
+            # Check for positive/completion responses
+            positive_indicators = ['thank you', 'thanks', 'sorted', 'solved', 'fixed', 'resolved', 'perfect', 'great', 'awesome', 'excellent', 'done', 'good', 'helpful', 'appreciate']
+            user_lower = user_input.lower()
+            
+            if any(indicator in user_lower for indicator in positive_indicators):
+                with st.chat_message("assistant"):
+                    response = "You're welcome! I'm glad I could help. 😊\n\nStarting a fresh conversation for you..."
+                    st.markdown(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    
+                    # Clear the chat and reset state after a brief pause
+                    import time
+                    time.sleep(1)
+                    st.session_state.messages = []
+                    st.session_state.conversation_state = "initial"
+                    st.session_state.current_category = None
+                    st.rerun()
+            
+            elif not AZURE_OPENAI_AVAILABLE:
                 with st.chat_message("assistant"):
                     st.error("AI service is not available.")
             else:
@@ -733,24 +776,30 @@ This form ensures your idea gets to the right people and receives proper conside
                             st.error("AI service is not configured.")
                     else:
                         with st.chat_message("assistant"):
-                            with st.spinner("🤔 Searching through company documents..."):
+                            with st.spinner("🔍 Searching relevant documents..."):
                                 placeholder = st.empty()
                                 full_response = ""
                                 
-                                # Prepare knowledge base context
+                                # Search for relevant documents instead of using all
+                                relevant_docs = search_relevant_documents(user_input, knowledge_base, max_docs=3)
+                                
+                                # Prepare knowledge base context with only relevant documents
                                 knowledge_context = ""
-                                if knowledge_base:
+                                if relevant_docs:
                                     knowledge_context = "\n\n".join([
-                                        f"Document: {doc['name']}\n{doc['content']}" 
-                                        for doc in knowledge_base
+                                        f"Document: {doc['name']}\n{doc['content'][:2000]}..." if len(doc['content']) > 2000 else f"Document: {doc['name']}\n{doc['content']}"
+                                        for doc in relevant_docs
                                     ])
+                                    st.info(f"📄 Searching {len(relevant_docs)} relevant documents")
+                                else:
+                                    st.warning("📄 No relevant documents found for this query")
                                 
                                 # System message with knowledge base
                                 system_message = {
                                     "role": "system", 
                                     "content": f"""You are a company knowledge base assistant. You ONLY provide information that can be found in the company documents provided to you.
 
-{f"COMPANY KNOWLEDGE BASE:\n{knowledge_context}" if knowledge_context else "You don't currently have access to any company documents."}
+{f"RELEVANT COMPANY DOCUMENTS:\n{knowledge_context}" if knowledge_context else "No relevant company documents found for this query."}
 
 IMPORTANT RESTRICTIONS:
 1. ONLY answer questions using information directly found in the company documents above
@@ -763,7 +812,8 @@ IMPORTANT RESTRICTIONS:
 Your role is to be a reliable source of company-specific information only."""
                                 }
                                 
-                                messages_for_api = [system_message] + st.session_state.messages
+                                # Only include the current user message and system message for faster processing
+                                messages_for_api = [system_message, {"role": "user", "content": user_input}]
                                 
                                 # Call Azure OpenAI API
                                 stream, error = call_openai_api(messages_for_api)
