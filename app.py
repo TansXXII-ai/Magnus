@@ -148,6 +148,39 @@ class DropboxConnector:
         except Exception as e:
             return f"Error reading file {file_path}: {str(e)}"
 
+# Enhanced Dropbox connector with persistent token storage
+class EnhancedDropboxConnector(DropboxConnector):
+    def __init__(self):
+        super().__init__()
+        # Try to load persistent token first
+        self.load_persistent_token()
+    
+    def load_persistent_token(self):
+        """Load token from persistent storage (simulated with session state)"""
+        # In a real app, you might store this in encrypted browser storage
+        if 'persistent_dropbox_token' in st.session_state:
+            self.access_token = st.session_state.persistent_dropbox_token
+            if DROPBOX_AVAILABLE and self.access_token:
+                self.dbx = dropbox.Dropbox(self.access_token)
+    
+    def test_connection(self):
+        """Test if the current token works"""
+        if not self.dbx:
+            return False, "No connection available"
+        
+        try:
+            account_info = self.dbx.users_get_current_account()
+            return True, f"Connected as: {account_info.name.display_name}"
+        except Exception as e:
+            return False, str(e)
+    
+    def store_persistent_token(self, token):
+        """Store token for future sessions"""
+        st.session_state.persistent_dropbox_token = token
+        self.access_token = token
+        if DROPBOX_AVAILABLE:
+            self.dbx = dropbox.Dropbox(token)
+
 # Initialize Dropbox connector
 @st.cache_resource
 def get_dropbox_connector():
@@ -202,39 +235,6 @@ def call_openai_api(messages):
         
     except Exception as e:
         return None, f"Azure OpenAI API error: {str(e)}"
-
-# Enhanced Dropbox connector with persistent token storage
-class EnhancedDropboxConnector(DropboxConnector):
-    def __init__(self):
-        super().__init__()
-        # Try to load persistent token first
-        self.load_persistent_token()
-    
-    def load_persistent_token(self):
-        """Load token from persistent storage (simulated with session state)"""
-        # In a real app, you might store this in encrypted browser storage
-        if 'persistent_dropbox_token' in st.session_state:
-            self.access_token = st.session_state.persistent_dropbox_token
-            if DROPBOX_AVAILABLE and self.access_token:
-                self.dbx = dropbox.Dropbox(self.access_token)
-    
-    def test_connection(self):
-        """Test if the current token works"""
-        if not self.dbx:
-            return False, "No connection available"
-        
-        try:
-            account_info = self.dbx.users_get_current_account()
-            return True, f"Connected as: {account_info.name.display_name}"
-        except Exception as e:
-            return False, str(e)
-    
-    def store_persistent_token(self, token):
-        """Store token for future sessions"""
-        st.session_state.persistent_dropbox_token = token
-        self.access_token = token
-        if DROPBOX_AVAILABLE:
-            self.dbx = dropbox.Dropbox(token)
 
 # Initialize session state
 if "authenticated" not in st.session_state:
@@ -429,14 +429,6 @@ def logout():
     st.session_state.dropbox_authenticated = False
     # Note: We keep persistent_dropbox_token for faster re-login
     st.rerun()
-
-# Main app logic - simplified flow
-if not st.session_state.authenticated:
-    show_login()
-elif not st.session_state.loading_complete:
-    show_loading()
-else:
-    show_main_app()
 
 # Main app
 def show_main_app():
@@ -709,4 +701,133 @@ This form ensures your idea gets to the right people and receives proper conside
 • Type **Issue** if something isn't working
 • Type **Problem** if you're experiencing difficulties"""
                     st.markdown(response)
-                    st.session_state.messages
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+        
+        elif st.session_state.conversation_state in ["waiting_for_issue", "waiting_for_problem", "categorized"]:
+            if not AZURE_OPENAI_AVAILABLE:
+                with st.chat_message("assistant"):
+                    st.error("AI service is not available.")
+            else:
+                try:
+                    api_key = os.getenv("AZURE_OPENAI_API_KEY")
+                    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+                    if not api_key or not endpoint:
+                        with st.chat_message("assistant"):
+                            st.error("AI service is not configured.")
+                    else:
+                        with st.chat_message("assistant"):
+                            with st.spinner("🤔 Searching through company documents..."):
+                                placeholder = st.empty()
+                                full_response = ""
+                                
+                                # Prepare knowledge base context
+                                knowledge_context = ""
+                                if knowledge_base:
+                                    knowledge_context = "\n\n".join([
+                                        f"Document: {doc['name']}\n{doc['content']}" 
+                                        for doc in knowledge_base
+                                    ])
+                                
+                                # System message with knowledge base
+                                system_message = {
+                                    "role": "system", 
+                                    "content": f"""You are a company knowledge base assistant. You ONLY provide information that can be found in the company documents provided to you.
+
+{f"COMPANY KNOWLEDGE BASE:\n{knowledge_context}" if knowledge_context else "You don't currently have access to any company documents."}
+
+IMPORTANT RESTRICTIONS:
+1. ONLY answer questions using information directly found in the company documents above
+2. If the answer is not in the company documents, respond with: "I cannot find that information in our company documents. Please contact your manager or HR for assistance with this question."
+3. Do NOT provide general advice, external information, or assumptions
+4. Do NOT make up information or provide answers based on general knowledge
+5. Always cite which specific document contains the information you're referencing
+6. If a question is partially covered in the documents, only answer the parts that are documented
+
+Your role is to be a reliable source of company-specific information only."""
+                                }
+                                
+                                messages_for_api = [system_message] + st.session_state.messages
+                                
+                                # Call Azure OpenAI API
+                                stream, error = call_openai_api(messages_for_api)
+                            
+                            if error:
+                                error_msg = f"AI Error: {error}"
+                                st.error(error_msg)
+                                placeholder.markdown(error_msg)
+                            elif stream:
+                                try:
+                                    for chunk in stream:
+                                        if (hasattr(chunk, 'choices') and 
+                                            len(chunk.choices) > 0 and 
+                                            hasattr(chunk.choices[0], 'delta') and
+                                            hasattr(chunk.choices[0].delta, 'content') and
+                                            chunk.choices[0].delta.content is not None):
+                                            
+                                            delta = chunk.choices[0].delta.content
+                                            full_response += delta
+                                            placeholder.markdown(full_response + "▌")
+                                    
+                                    placeholder.markdown(full_response)
+                                    
+                                    st.session_state.messages.append({
+                                        "role": "assistant", 
+                                        "content": full_response
+                                    })
+                                    
+                                    # Follow-up for issues/problems
+                                    if st.session_state.conversation_state in ["waiting_for_issue", "waiting_for_problem"]:
+                                        if "cannot find that information" not in full_response.lower():
+                                            follow_up = f"\n\n---\n\nDid this information help resolve your {st.session_state.current_category}? If not, you can submit an **[Innovation Request](https://www.jotform.com/form/250841782712054)** to get additional support."
+                                            placeholder.markdown(full_response + follow_up)
+                                            st.session_state.messages[-1]["content"] += follow_up
+                                        else:
+                                            follow_up = f"\n\n---\n\nSince I couldn't find specific information about your {st.session_state.current_category}, I recommend submitting an **[Innovation Request](https://www.jotform.com/form/250841782712054)** to get proper support from our team."
+                                            placeholder.markdown(full_response + follow_up)
+                                            st.session_state.messages[-1]["content"] += follow_up
+                                        
+                                        st.session_state.conversation_state = "completed"
+                                    
+                                except Exception as e:
+                                    error_msg = f"Streaming Error: {str(e)}"
+                                    st.error(error_msg)
+                                    placeholder.markdown(error_msg)
+                
+                except Exception as e:
+                    with st.chat_message("assistant"):
+                        st.error(f"Unexpected error: {str(e)}")
+
+        # Show initial categorization if no messages yet
+        if not st.session_state.messages and st.session_state.conversation_state == "initial":
+            with st.chat_message("assistant"):
+                response = """👋 Welcome to MAGnus Knowledge Bot!
+
+I'm here to help! To provide you with the best assistance, please let me know what type of request this is:
+
+🤔 **Question** - I need information or guidance
+🔄 **Change** - I want to suggest an improvement or new feature  
+⚠️ **Issue** - Something isn't working as expected
+🔧 **Problem** - I'm experiencing a technical difficulty
+
+Please type one of these options: **Question**, **Change**, **Issue**, or **Problem**"""
+                
+                st.markdown(response)
+                st.session_state.messages.append({"role": "assistant", "content": response})
+                st.session_state.conversation_state = "categorizing"
+
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "<div style='text-align: center; color: gray; font-size: 0.8em;'>"
+        f"MAGnus Knowledge Bot • {len(knowledge_base)} documents • Secured with Auto-Login"
+        "</div>", 
+        unsafe_allow_html=True
+    )
+
+# Main app logic - simplified flow
+if not st.session_state.authenticated:
+    show_login()
+elif not st.session_state.loading_complete:
+    show_loading()
+else:
+    show_main_app()
