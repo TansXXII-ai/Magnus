@@ -208,30 +208,56 @@ def load_knowledge_base():
         # Return cached data if available, otherwise show warning
         raise Exception(f"Using cached documents due to error: {str(e)}")
 
-def search_relevant_documents(query, knowledge_base, max_docs=3):
+def search_relevant_documents(query, knowledge_base, max_docs=5):
     """Search for the most relevant documents based on the query"""
     if not knowledge_base:
         return []
     
-    # Simple keyword-based relevance scoring
+    # Simple keyword-based relevance scoring with broader matching
     query_words = query.lower().split()
     scored_docs = []
     
     for doc in knowledge_base:
         content_lower = doc['content'].lower()
+        name_lower = doc['name'].lower()
         score = 0
         
-        # Count keyword matches
+        # Count keyword matches in content and filename
         for word in query_words:
-            if len(word) > 2:  # Skip very short words
+            if len(word) > 1:  # Include shorter words for better matching
+                # Higher weight for matches in document name
+                score += name_lower.count(word) * 3
+                # Regular weight for content matches
                 score += content_lower.count(word)
         
-        if score > 0:
-            scored_docs.append((score, doc))
+        # Add partial matching for common words
+        common_terms = {
+            'login': ['sign in', 'log in', 'access', 'password'],
+            'phone': ['telephone', 'call', 'dial'],
+            'claim': ['claims', 'insurance', 'policy'],
+            'system': ['platform', 'software', 'application'],
+            'help': ['support', 'assistance', 'guide'],
+            'how': ['instructions', 'steps', 'process']
+        }
+        
+        for word in query_words:
+            if word in common_terms:
+                for synonym in common_terms[word]:
+                    score += content_lower.count(synonym) * 2
+        
+        scored_docs.append((score, doc))
     
     # Sort by score and return top documents
     scored_docs.sort(key=lambda x: x[0], reverse=True)
-    return [doc for score, doc in scored_docs[:max_docs]]
+    
+    # If we have fewer than 3 relevant documents, include more to ensure coverage
+    relevant_docs = [doc for score, doc in scored_docs if score > 0]
+    
+    if len(relevant_docs) < 3:
+        # Include all documents if we don't have enough relevant ones
+        return knowledge_base[:max_docs]
+    
+    return relevant_docs[:max_docs]
 
 def call_openai_api(messages):
     """Call Azure OpenAI API"""
@@ -781,25 +807,36 @@ This form ensures your idea gets to the right people and receives proper conside
                                 full_response = ""
                                 
                                 # Search for relevant documents instead of using all
-                                relevant_docs = search_relevant_documents(user_input, knowledge_base, max_docs=3)
+                                relevant_docs = search_relevant_documents(user_input, knowledge_base, max_docs=5)
                                 
                                 # Prepare knowledge base context with only relevant documents
                                 knowledge_context = ""
                                 if relevant_docs:
+                                    # Don't truncate for better coverage
                                     knowledge_context = "\n\n".join([
-                                        f"Document: {doc['name']}\n{doc['content'][:2000]}..." if len(doc['content']) > 2000 else f"Document: {doc['name']}\n{doc['content']}"
+                                        f"Document: {doc['name']}\n{doc['content']}"
                                         for doc in relevant_docs
                                     ])
-                                    st.info(f"📄 Searching {len(relevant_docs)} relevant documents")
+                                    
+                                    # Show helpful feedback
+                                    if len(relevant_docs) == len(knowledge_base):
+                                        st.info(f"📄 Searching all {len(relevant_docs)} documents for comprehensive coverage")
+                                    else:
+                                        st.info(f"📄 Searching {len(relevant_docs)} most relevant documents")
                                 else:
-                                    st.warning("📄 No relevant documents found for this query")
+                                    # Fallback to all documents if search fails
+                                    knowledge_context = "\n\n".join([
+                                        f"Document: {doc['name']}\n{doc['content']}"
+                                        for doc in knowledge_base
+                                    ])
+                                    st.info(f"📄 Searching all {len(knowledge_base)} documents")
                                 
                                 # System message with knowledge base
                                 system_message = {
                                     "role": "system", 
                                     "content": f"""You are a company knowledge base assistant. You ONLY provide information that can be found in the company documents provided to you.
 
-{f"RELEVANT COMPANY DOCUMENTS:\n{knowledge_context}" if knowledge_context else "No relevant company documents found for this query."}
+{f"COMPANY DOCUMENTS:\n{knowledge_context}" if knowledge_context else "No company documents available."}
 
 IMPORTANT RESTRICTIONS:
 1. ONLY answer questions using information directly found in the company documents above
@@ -808,12 +845,14 @@ IMPORTANT RESTRICTIONS:
 4. Do NOT make up information or provide answers based on general knowledge
 5. Always cite which specific document contains the information you're referencing
 6. If a question is partially covered in the documents, only answer the parts that are documented
+7. Be helpful and thorough in your search through the documents
 
 Your role is to be a reliable source of company-specific information only."""
                                 }
                                 
-                                # Only include the current user message and system message for faster processing
-                                messages_for_api = [system_message, {"role": "user", "content": user_input}]
+                                # Include more conversation context for better understanding
+                                recent_messages = st.session_state.messages[-3:] if len(st.session_state.messages) > 3 else st.session_state.messages
+                                messages_for_api = [system_message] + recent_messages
                                 
                                 # Call Azure OpenAI API
                                 stream, error = call_openai_api(messages_for_api)
