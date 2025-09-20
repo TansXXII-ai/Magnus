@@ -48,6 +48,12 @@ except ImportError:
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
+if "loading_complete" not in st.session_state:
+    st.session_state.loading_complete = False
+
+if "knowledge_base" not in st.session_state:
+    st.session_state.knowledge_base = []
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -90,11 +96,17 @@ def logout():
 # Main app (only shown when authenticated)
 def show_main_app():
     
-    # Header with logout button
-    col1, col2 = st.columns([4, 1])
+    # Header with logo and logout button
+    col1, col2, col3 = st.columns([1, 4, 1])
     with col1:
-        st.title("🤖 MAGnus - MA Groups Knowledge Bot")
+        try:
+            st.image("MAGNUS AI Logo Design.png", width=80)
+        except:
+            # Fallback: show company initials if logo fails
+            st.markdown("**MAG**")
     with col2:
+        st.title("🤖 MAGnus - MA Groups Knowledge Bot")
+    with col3:
         if st.button("🚪 Logout", help="Logout from MAGnus"):
             logout()
     
