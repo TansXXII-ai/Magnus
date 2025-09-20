@@ -44,7 +44,164 @@ try:
 except ImportError:
     pass
 
-# Initialize session state for authentication
+# Dropbox API functions
+class DropboxConnector:
+    def __init__(self):
+        self.access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
+        self.folder_path = os.getenv("DROPBOX_FOLDER_PATH", "/MAGnus")
+        self.dbx = None
+        
+        if self.access_token and DROPBOX_AVAILABLE:
+            self.dbx = dropbox.Dropbox(self.access_token)
+    
+    def get_documents(self):
+        """Fetch documents from Dropbox folder"""
+        if not self.dbx:
+            return []
+        
+        try:
+            documents = []
+            
+            # List files in the specified folder
+            result = self.dbx.files_list_folder(self.folder_path)
+            
+            for entry in result.entries:
+                if isinstance(entry, dropbox.files.FileMetadata):
+                    # Process multiple file types
+                    file_extension = entry.name.lower().split('.')[-1]
+                    
+                    if file_extension in ['txt', 'md', 'csv', 'pdf', 'docx']:
+                        content = self.get_file_content(entry.path_lower, file_extension)
+                        if content and not content.startswith("Cannot process") and not content.startswith("Error"):
+                            documents.append({
+                                'name': entry.name,
+                                'content': content,
+                                'source': 'dropbox',
+                                'modified': entry.server_modified.isoformat() if entry.server_modified else '',
+                                'size': entry.size,
+                                'path': entry.path_lower,
+                                'type': file_extension
+                            })
+            
+            return documents
+            
+        except dropbox.exceptions.AuthError:
+            raise Exception("Dropbox authentication failed. Check your access token.")
+        except dropbox.exceptions.ApiError as e:
+            raise Exception(f"Dropbox API error: {str(e)}")
+        except Exception as e:
+            raise Exception(f"Error fetching Dropbox documents: {str(e)}")
+    
+    def get_file_content(self, file_path, file_extension):
+        """Get content of a specific file based on its type"""
+        try:
+            _, response = self.dbx.files_download(file_path)
+            
+            if file_extension in ['txt', 'md', 'csv']:
+                # Text files
+                content = response.content.decode('utf-8')
+                return content
+            
+            elif file_extension == 'pdf' and PDF_AVAILABLE:
+                # PDF files
+                import io
+                pdf_file = io.BytesIO(response.content)
+                
+                if hasattr(pypdf, 'PdfReader'):
+                    pdf_reader = pypdf.PdfReader(pdf_file)
+                else:
+                    pdf_reader = pypdf.PdfFileReader(pdf_file)
+                
+                text_content = ""
+                for page in pdf_reader.pages:
+                    text_content += page.extract_text() + "\n"
+                
+                return text_content.strip()
+            
+            elif file_extension == 'docx' and DOCX_AVAILABLE:
+                # DOCX files
+                import io
+                docx_file = io.BytesIO(response.content)
+                doc = Document(docx_file)
+                
+                text_content = ""
+                for paragraph in doc.paragraphs:
+                    text_content += paragraph.text + "\n"
+                
+                return text_content.strip()
+            
+            else:
+                # Unsupported file type or missing library
+                missing_libs = []
+                if file_extension == 'pdf' and not PDF_AVAILABLE:
+                    missing_libs.append("pypdf")
+                if file_extension == 'docx' and not DOCX_AVAILABLE:
+                    missing_libs.append("python-docx")
+                
+                if missing_libs:
+                    return f"Cannot process {file_extension.upper()} files. Missing libraries: {', '.join(missing_libs)}"
+                else:
+                    return f"Unsupported file type: {file_extension}"
+                    
+        except UnicodeDecodeError:
+            return f"File {file_path} contains binary data - cannot display as text"
+        except Exception as e:
+            return f"Error reading file {file_path}: {str(e)}"
+
+# Initialize Dropbox connector
+@st.cache_resource
+def get_dropbox_connector():
+    return DropboxConnector()
+
+# Load documents from Dropbox
+@st.cache_data(ttl=1800)  # Cache for 30 minutes instead of 5
+def load_knowledge_base():
+    """Load documents from Dropbox with optimized caching"""
+    connector = get_dropbox_connector()
+    
+    # Check if credentials are configured
+    access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
+    
+    if not access_token:
+        return []
+    
+    if not DROPBOX_AVAILABLE:
+        raise Exception("Dropbox library not available. Check requirements.txt")
+    
+    try:
+        documents = connector.get_documents()
+        return documents
+    except Exception as e:
+        # Return cached data if available, otherwise show warning
+        raise Exception(f"Using cached documents due to error: {str(e)}")
+
+def call_openai_api(messages):
+    """Call Azure OpenAI API"""
+    api_key = os.getenv("AZURE_OPENAI_API_KEY")
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1-mini")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+    
+    if not api_key or not endpoint:
+        return None, "Missing Azure OpenAI credentials"
+    
+    try:
+        client = AzureOpenAI(
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=endpoint
+        )
+        
+        return client.chat.completions.create(
+            model=deployment_name,
+            messages=messages,
+            stream=True,
+            temperature=0.7,
+            max_tokens=2000
+        ), None
+        
+    except Exception as e:
+        return None, f"Azure OpenAI API error: {str(e)}"
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
