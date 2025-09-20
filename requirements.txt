@@ -1,5 +1,7 @@
 streamlit
 openai
 dropbox
+requests
+urllib3
 pypdf
 python-docx
