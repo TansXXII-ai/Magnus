@@ -588,7 +588,24 @@ ADMIN_PASSWORD = "your-admin-password"
     col1, col2 = st.columns([3, 1])
 
     with col1:
-        # Display chat history
+        # Show initial welcome message automatically when chat loads
+        if not st.session_state.messages and st.session_state.conversation_state == "initial":
+            # Add the welcome message to session state immediately
+            welcome_response = """👋 Welcome to MAGnus Knowledge Bot!
+
+I'm here to help! To provide you with the best assistance, please let me know what type of request this is:
+
+🤔 **Question** - I need information or guidance
+🔄 **Change** - I want to suggest an improvement or new feature  
+⚠️ **Issue** - Something isn't working as expected
+🔧 **Problem** - I'm experiencing a technical difficulty
+
+Please type one of these options: **Question**, **Change**, **Issue**, or **Problem**"""
+            
+            st.session_state.messages.append({"role": "assistant", "content": welcome_response})
+            st.session_state.conversation_state = "categorizing"
+        
+        # Display chat history (including the welcome message)
         for idx, message in enumerate(st.session_state.messages):
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
@@ -796,24 +813,6 @@ Your role is to be a reliable source of company-specific information only."""
                 except Exception as e:
                     with st.chat_message("assistant"):
                         st.error(f"Unexpected error: {str(e)}")
-
-        # Show initial categorization if no messages yet
-        if not st.session_state.messages and st.session_state.conversation_state == "initial":
-            with st.chat_message("assistant"):
-                response = """👋 Welcome to MAGnus Knowledge Bot!
-
-I'm here to help! To provide you with the best assistance, please let me know what type of request this is:
-
-🤔 **Question** - I need information or guidance
-🔄 **Change** - I want to suggest an improvement or new feature  
-⚠️ **Issue** - Something isn't working as expected
-🔧 **Problem** - I'm experiencing a technical difficulty
-
-Please type one of these options: **Question**, **Change**, **Issue**, or **Problem**"""
-                
-                st.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
-                st.session_state.conversation_state = "categorizing"
 
     # Footer
     st.markdown("---")
