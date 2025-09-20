@@ -1,7 +1,12 @@
 import os
 import json
 import streamlit as st
+import requests
+import secrets
+import base64
+import hashlib
 from datetime import datetime
+from urllib.parse import urlencode, parse_qs, urlparse
 
 # Page config
 st.set_page_config(
@@ -44,20 +49,107 @@ try:
 except ImportError:
     pass
 
-# Dropbox API functions
-class DropboxConnector:
+# Dropbox OAuth 2 functions
+class DropboxOAuthConnector:
     def __init__(self):
-        self.access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
+        self.client_id = os.getenv("DROPBOX_CLIENT_ID")
+        self.client_secret = os.getenv("DROPBOX_CLIENT_SECRET")
+        self.redirect_uri = os.getenv("DROPBOX_REDIRECT_URI", "http://localhost:8501")
         self.folder_path = os.getenv("DROPBOX_FOLDER_PATH", "/MAGnus")
+        self.access_token = None
         self.dbx = None
+    
+    def generate_auth_url(self):
+        """Generate Dropbox OAuth 2 authorization URL with PKCE"""
+        if not self.client_id:
+            raise Exception("Dropbox Client ID not configured")
         
-        if self.access_token and DROPBOX_AVAILABLE:
+        # Generate PKCE code verifier and challenge
+        code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
+        code_challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode('utf-8')).digest()
+        ).decode('utf-8').rstrip('=')
+        
+        # Store code verifier in session state
+        st.session_state.code_verifier = code_verifier
+        
+        # Build authorization URL
+        auth_params = {
+            'client_id': self.client_id,
+            'response_type': 'code',
+            'redirect_uri': self.redirect_uri,
+            'code_challenge': code_challenge,
+            'code_challenge_method': 'S256',
+            'scope': 'files.metadata.read files.content.read',
+            'state': secrets.token_urlsafe(32)  # CSRF protection
+        }
+        
+        # Store state for verification
+        st.session_state.oauth_state = auth_params['state']
+        
+        auth_url = f"https://www.dropbox.com/oauth2/authorize?{urlencode(auth_params)}"
+        return auth_url
+    
+    def handle_oauth_callback(self, authorization_code, state):
+        """Handle OAuth callback and exchange code for access token"""
+        # Verify state parameter (CSRF protection)
+        if state != st.session_state.get('oauth_state'):
+            raise Exception("Invalid state parameter - possible CSRF attack")
+        
+        if not hasattr(st.session_state, 'code_verifier'):
+            raise Exception("Code verifier not found in session")
+        
+        # Exchange authorization code for access token
+        token_data = {
+            'code': authorization_code,
+            'grant_type': 'authorization_code',
+            'client_id': self.client_id,
+            'client_secret': self.client_secret,
+            'redirect_uri': self.redirect_uri,
+            'code_verifier': st.session_state.code_verifier
+        }
+        
+        response = requests.post('https://api.dropboxapi.com/oauth2/token', data=token_data)
+        
+        if response.status_code == 200:
+            token_response = response.json()
+            self.access_token = token_response['access_token']
+            
+            # Store token in session state (in production, use encrypted storage)
+            st.session_state.dropbox_access_token = self.access_token
+            st.session_state.dropbox_authenticated = True
+            
+            # Initialize Dropbox client
             self.dbx = dropbox.Dropbox(self.access_token)
+            
+            return True
+        else:
+            raise Exception(f"Token exchange failed: {response.text}")
+    
+    def initialize_client(self, access_token=None):
+        """Initialize Dropbox client with access token"""
+        token = access_token or st.session_state.get('dropbox_access_token')
+        if token and DROPBOX_AVAILABLE:
+            self.access_token = token
+            self.dbx = dropbox.Dropbox(token)
+            return True
+        return False
+    
+    def test_connection(self):
+        """Test if the Dropbox connection is working"""
+        if not self.dbx:
+            return False, "No Dropbox client initialized"
+        
+        try:
+            account_info = self.dbx.users_get_current_account()
+            return True, f"Connected as: {account_info.name.display_name}"
+        except Exception as e:
+            return False, f"Connection test failed: {str(e)}"
     
     def get_documents(self):
         """Fetch documents from Dropbox folder"""
         if not self.dbx:
-            return []
+            raise Exception("Dropbox client not initialized")
         
         try:
             documents = []
@@ -76,7 +168,7 @@ class DropboxConnector:
                             documents.append({
                                 'name': entry.name,
                                 'content': content,
-                                'source': 'dropbox',
+                                'source': 'dropbox_oauth',
                                 'modified': entry.server_modified.isoformat() if entry.server_modified else '',
                                 'size': entry.size,
                                 'path': entry.path_lower,
@@ -86,7 +178,12 @@ class DropboxConnector:
             return documents
             
         except dropbox.exceptions.AuthError:
-            raise Exception("Dropbox authentication failed. Check your access token.")
+            # Clear stored token if auth fails
+            if 'dropbox_access_token' in st.session_state:
+                del st.session_state.dropbox_access_token
+            if 'dropbox_authenticated' in st.session_state:
+                del st.session_state.dropbox_authenticated
+            raise Exception("Dropbox authentication expired. Please re-authenticate.")
         except dropbox.exceptions.ApiError as e:
             raise Exception(f"Dropbox API error: {str(e)}")
         except Exception as e:
@@ -151,18 +248,20 @@ class DropboxConnector:
 # Initialize Dropbox connector
 @st.cache_resource
 def get_dropbox_connector():
-    return DropboxConnector()
+    return DropboxOAuthConnector()
 
 # Load documents from Dropbox
-@st.cache_data(ttl=1800)  # Cache for 30 minutes instead of 5
+@st.cache_data(ttl=1800)  # Cache for 30 minutes
 def load_knowledge_base():
-    """Load documents from Dropbox with optimized caching"""
+    """Load documents from Dropbox with OAuth authentication"""
     connector = get_dropbox_connector()
     
-    # Check if credentials are configured
-    access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
+    # Check if user is authenticated with Dropbox
+    if not st.session_state.get('dropbox_authenticated', False):
+        return []
     
-    if not access_token:
+    # Initialize client with stored token
+    if not connector.initialize_client():
         return []
     
     if not DROPBOX_AVAILABLE:
@@ -172,8 +271,13 @@ def load_knowledge_base():
         documents = connector.get_documents()
         return documents
     except Exception as e:
-        # Return cached data if available, otherwise show warning
-        raise Exception(f"Using cached documents due to error: {str(e)}")
+        # If authentication fails, clear stored credentials
+        if "authentication expired" in str(e).lower():
+            if 'dropbox_access_token' in st.session_state:
+                del st.session_state.dropbox_access_token
+            if 'dropbox_authenticated' in st.session_state:
+                del st.session_state.dropbox_authenticated
+        raise Exception(f"Error loading documents: {str(e)}")
 
 def call_openai_api(messages):
     """Call Azure OpenAI API"""
@@ -202,6 +306,8 @@ def call_openai_api(messages):
         
     except Exception as e:
         return None, f"Azure OpenAI API error: {str(e)}"
+
+# Initialize session state
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
@@ -215,14 +321,45 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 if "conversation_state" not in st.session_state:
-    st.session_state.conversation_state = "initial"  # initial, categorized, waiting_for_issue, waiting_for_problem
+    st.session_state.conversation_state = "initial"
 
 if "current_category" not in st.session_state:
     st.session_state.current_category = None
 
+if "dropbox_authenticated" not in st.session_state:
+    st.session_state.dropbox_authenticated = False
+
+# Handle OAuth callback
+def handle_oauth_callback():
+    """Handle OAuth callback from URL parameters"""
+    # Get URL parameters
+    query_params = st.query_params
+    
+    if 'code' in query_params and 'state' in query_params:
+        connector = get_dropbox_connector()
+        try:
+            success = connector.handle_oauth_callback(
+                query_params['code'], 
+                query_params['state']
+            )
+            if success:
+                st.success("✅ Dropbox authentication successful!")
+                # Clear URL parameters
+                st.query_params.clear()
+                # Force reload to refresh the app state
+                st.rerun()
+            else:
+                st.error("❌ Dropbox authentication failed")
+        except Exception as e:
+            st.error(f"❌ OAuth error: {str(e)}")
+            # Clear any partial auth state
+            if 'dropbox_access_token' in st.session_state:
+                del st.session_state.dropbox_access_token
+            if 'dropbox_authenticated' in st.session_state:
+                del st.session_state.dropbox_authenticated
+
 # Login function
 def show_login():
-    # Add logo to login page
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         try:
@@ -247,21 +384,63 @@ def show_login():
             login_button = st.form_submit_button("Login", use_container_width=True)
         
         if login_button:
-            # Check credentials
             correct_username = "MAG"
             correct_password = st.secrets.get("LOGIN_PASSWORD", "defaultpassword")
             
             if username == correct_username and password == correct_password:
                 st.session_state.authenticated = True
-                st.session_state.loading_complete = False  # Reset loading state
-                st.success("Login successful! Loading knowledge base...")
+                st.session_state.loading_complete = False
+                st.success("Login successful! Checking Dropbox connection...")
                 st.rerun()
             else:
                 st.error("Invalid username or password. Please try again.")
 
+# Dropbox authentication function
+def show_dropbox_auth():
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        try:
+            st.image("MAGNUS AI Logo Design.png", width=150)
+        except:
+            pass
+    
+    st.title("🔗 Connect to Dropbox")
+    
+    st.markdown("""
+    **Secure Dropbox Integration**
+    
+    To access your company knowledge base, we need to connect to Dropbox using secure OAuth 2.0 authentication.
+    
+    This ensures your data remains secure and we only access the documents you've authorized.
+    """)
+    
+    connector = get_dropbox_connector()
+    
+    # Check if we have the necessary configuration
+    if not connector.client_id:
+        st.error("❌ Dropbox OAuth not configured. Please contact your administrator.")
+        if st.button("🚪 Logout"):
+            logout()
+        return
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("🔗 Connect to Dropbox", type="primary", use_container_width=True):
+            try:
+                auth_url = connector.generate_auth_url()
+                st.markdown(f"**[Click here to authenticate with Dropbox]({auth_url})**")
+                st.info("👆 Click the link above to authorize MAGnus to access your Dropbox documents.")
+                st.markdown("After authorization, you'll be redirected back here automatically.")
+            except Exception as e:
+                st.error(f"Error generating authentication URL: {str(e)}")
+        
+        st.markdown("---")
+        
+        if st.button("🚪 Logout", use_container_width=True):
+            logout()
+
 # Loading function
 def show_loading():
-    # Add logo to loading page
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         try:
@@ -271,46 +450,53 @@ def show_loading():
     
     st.title("🤖 MAGnus Knowledge Bot")
     
-    # Loading indicators
     st.markdown("### 📚 Loading Knowledge Base")
     
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    # Load knowledge base with progress updates
     status_text.text("Connecting to Dropbox...")
     progress_bar.progress(20)
     
-    # Initialize Dropbox connector
     connector = get_dropbox_connector()
     
-    status_text.text("Fetching document list...")
-    progress_bar.progress(40)
-    
-    # Check credentials
-    access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
-    if not access_token:
-        st.error("❌ Dropbox access token not configured")
+    # Check if authenticated
+    if not st.session_state.get('dropbox_authenticated', False):
+        st.error("❌ Dropbox not authenticated")
         return
     
-    status_text.text("Processing documents...")
-    progress_bar.progress(60)
+    status_text.text("Initializing Dropbox client...")
+    progress_bar.progress(40)
+    
+    # Initialize client
+    if not connector.initialize_client():
+        st.error("❌ Failed to initialize Dropbox client")
+        return
+    
+    status_text.text("Testing connection...")
+    progress_bar.progress(50)
+    
+    # Test connection
+    connected, message = connector.test_connection()
+    if not connected:
+        st.error(f"❌ Connection failed: {message}")
+        return
+    
+    status_text.text("Fetching documents...")
+    progress_bar.progress(70)
     
     try:
-        # Load documents
-        documents = connector.get_documents()
+        documents = load_knowledge_base()
         st.session_state.knowledge_base = documents
         
-        progress_bar.progress(80)
+        progress_bar.progress(90)
         status_text.text("Finalizing setup...")
         
         progress_bar.progress(100)
         status_text.text(f"✅ Loaded {len(documents)} documents successfully!")
         
-        # Mark loading as complete
         st.session_state.loading_complete = True
         
-        # Small delay to show completion
         import time
         time.sleep(1)
         
@@ -320,7 +506,6 @@ def show_loading():
         st.error(f"❌ Error loading documents: {str(e)}")
         st.info("Please check your Dropbox configuration and try again.")
         
-        # Option to retry or logout
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🔄 Retry"):
@@ -334,19 +519,20 @@ def logout():
     st.session_state.authenticated = False
     st.session_state.loading_complete = False
     st.session_state.knowledge_base = []
-    st.session_state.messages = []  # Clear chat history on logout
+    st.session_state.messages = []
+    st.session_state.dropbox_authenticated = False
+    if 'dropbox_access_token' in st.session_state:
+        del st.session_state.dropbox_access_token
     st.rerun()
 
-# Main app (only shown when authenticated)
+# Main app
 def show_main_app():
-    
-    # Header with logo and logout button
+    # Header
     col1, col2, col3 = st.columns([1, 4, 1])
     with col1:
         try:
             st.image("MAGNUS AI Logo Design.png", width=80)
         except:
-            # Fallback: show company initials if logo fails
             st.markdown("**MAG**")
     with col2:
         st.title("🤖 MAGnus - MA Groups Knowledge Bot")
@@ -354,7 +540,7 @@ def show_main_app():
         if st.button("🚪 Logout", help="Logout from MAGnus"):
             logout()
     
-    # Information section about the chatbot
+    # Information section
     st.markdown("""
     **Welcome to the MAGnus Knowledge Base Chatbot!** This AI assistant has access to company documents and can help you find information quickly.
 
@@ -369,176 +555,10 @@ def show_main_app():
     ---
     """)
 
-    # Dropbox API functions
-    class DropboxConnector:
-        def __init__(self):
-            self.access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
-            self.folder_path = os.getenv("DROPBOX_FOLDER_PATH", "/MAGnus")
-            self.dbx = None
-            
-            if self.access_token and DROPBOX_AVAILABLE:
-                self.dbx = dropbox.Dropbox(self.access_token)
-        
-        def get_documents(self):
-            """Fetch documents from Dropbox folder"""
-            if not self.dbx:
-                return []
-            
-            try:
-                documents = []
-                
-                # List files in the specified folder
-                result = self.dbx.files_list_folder(self.folder_path)
-                
-                for entry in result.entries:
-                    if isinstance(entry, dropbox.files.FileMetadata):
-                        # Process multiple file types
-                        file_extension = entry.name.lower().split('.')[-1]
-                        
-                        if file_extension in ['txt', 'md', 'csv', 'pdf', 'docx']:
-                            content = self.get_file_content(entry.path_lower, file_extension)
-                            if content and not content.startswith("Cannot process") and not content.startswith("Error"):
-                                documents.append({
-                                    'name': entry.name,
-                                    'content': content,
-                                    'source': 'dropbox',
-                                    'modified': entry.server_modified.isoformat() if entry.server_modified else '',
-                                    'size': entry.size,
-                                    'path': entry.path_lower,
-                                    'type': file_extension
-                                })
-                
-                return documents
-                
-            except dropbox.exceptions.AuthError:
-                st.error("❌ Dropbox authentication failed. Check your access token.")
-                return []
-            except dropbox.exceptions.ApiError as e:
-                st.error(f"❌ Dropbox API error: {str(e)}")
-                return []
-            except Exception as e:
-                st.error(f"❌ Error fetching Dropbox documents: {str(e)}")
-                return []
-        
-        def get_file_content(self, file_path, file_extension):
-            """Get content of a specific file based on its type"""
-            try:
-                _, response = self.dbx.files_download(file_path)
-                
-                if file_extension in ['txt', 'md', 'csv']:
-                    # Text files
-                    content = response.content.decode('utf-8')
-                    return content
-                
-                elif file_extension == 'pdf' and PDF_AVAILABLE:
-                    # PDF files
-                    import io
-                    pdf_file = io.BytesIO(response.content)
-                    
-                    if hasattr(pypdf, 'PdfReader'):
-                        pdf_reader = pypdf.PdfReader(pdf_file)
-                    else:
-                        pdf_reader = pypdf.PdfFileReader(pdf_file)
-                    
-                    text_content = ""
-                    for page in pdf_reader.pages:
-                        text_content += page.extract_text() + "\n"
-                    
-                    return text_content.strip()
-                
-                elif file_extension == 'docx' and DOCX_AVAILABLE:
-                    # DOCX files
-                    import io
-                    docx_file = io.BytesIO(response.content)
-                    doc = Document(docx_file)
-                    
-                    text_content = ""
-                    for paragraph in doc.paragraphs:
-                        text_content += paragraph.text + "\n"
-                    
-                    return text_content.strip()
-                
-                else:
-                    # Unsupported file type or missing library
-                    missing_libs = []
-                    if file_extension == 'pdf' and not PDF_AVAILABLE:
-                        missing_libs.append("pypdf")
-                    if file_extension == 'docx' and not DOCX_AVAILABLE:
-                        missing_libs.append("python-docx")
-                    
-                    if missing_libs:
-                        return f"Cannot process {file_extension.upper()} files. Missing libraries: {', '.join(missing_libs)}"
-                    else:
-                        return f"Unsupported file type: {file_extension}"
-                        
-            except UnicodeDecodeError:
-                return f"File {file_path} contains binary data - cannot display as text"
-            except Exception as e:
-                return f"Error reading file {file_path}: {str(e)}"
-
-    # Initialize Dropbox connector
-    @st.cache_resource
-    def get_dropbox_connector():
-        return DropboxConnector()
-
-    # Load documents from Dropbox
-    @st.cache_data(ttl=1800)  # Cache for 30 minutes instead of 5
-    def load_knowledge_base():
-        """Load documents from Dropbox with optimized caching"""
-        connector = get_dropbox_connector()
-        
-        # Check if credentials are configured
-        access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
-        
-        if not access_token:
-            return []
-        
-        if not DROPBOX_AVAILABLE:
-            st.error("❌ Dropbox library not available. Check requirements.txt")
-            return []
-        
-        try:
-            documents = connector.get_documents()
-            return documents
-        except Exception as e:
-            # Return cached data if available, otherwise show warning
-            st.warning(f"Using cached documents due to error: {str(e)}")
-            return []
-
-    def call_openai_api(messages):
-        """Call Azure OpenAI API"""
-        api_key = os.getenv("AZURE_OPENAI_API_KEY")
-        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-        deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1-mini")
-        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
-        
-        if not api_key or not endpoint:
-            return None, "Missing Azure OpenAI credentials"
-        
-        try:
-            client = AzureOpenAI(
-                api_key=api_key,
-                api_version=api_version,
-                azure_endpoint=endpoint
-            )
-            
-            return client.chat.completions.create(
-                model=deployment_name,
-                messages=messages,
-                stream=True,
-                temperature=0.7,
-                max_tokens=2000
-            ), None
-            
-        except Exception as e:
-            return None, f"Azure OpenAI API error: {str(e)}"
-
-    # Load knowledge base from session state (already loaded during login)
     knowledge_base = st.session_state.knowledge_base
 
     # Sidebar
     with st.sidebar:
-        # Status section
         st.header("📊 Status")
         
         if AZURE_OPENAI_AVAILABLE:
@@ -546,17 +566,22 @@ def show_main_app():
         else:
             st.error("❌ Azure OpenAI Unavailable")
         
-        # Dropbox status
-        dropbox_token = os.getenv("DROPBOX_ACCESS_TOKEN")
+        # Dropbox OAuth status
+        if st.session_state.get('dropbox_authenticated', False):
+            st.success("✅ Dropbox OAuth Connected")
+            
+            # Show connection test
+            connector = get_dropbox_connector()
+            if connector.initialize_client():
+                connected, message = connector.test_connection()
+                if connected:
+                    st.info(f"👤 {message}")
+                else:
+                    st.warning(f"⚠️ {message}")
+        else:
+            st.error("❌ Dropbox Not Authenticated")
         
-        if dropbox_token and DROPBOX_AVAILABLE:
-            st.success("✅ Dropbox Connected")
-        elif not dropbox_token:
-            st.error("❌ Dropbox Token Missing")
-        elif not DROPBOX_AVAILABLE:
-            st.error("❌ Dropbox Library Missing")
-        
-        st.info("📄 **Live Dropbox Integration**")
+        st.info("🔐 **Secure OAuth 2.0 Integration**")
         
         st.divider()
         
@@ -565,25 +590,22 @@ def show_main_app():
         if knowledge_base:
             st.success(f"✅ {len(knowledge_base)} Dropbox documents loaded")
             
-            # Show refresh button
             if st.button("🔄 Refresh Documents", key="refresh_docs"):
-                # Clear session state and reload
                 st.session_state.knowledge_base = []
                 st.session_state.loading_complete = False
                 st.rerun()
             
-            # Show last update time
             st.caption("📅 Auto-refreshes every 30 minutes")
             
         else:
             st.warning("⚠️ No Dropbox documents found")
-            st.info("Check Dropbox folder and file permissions")
+            st.info("Check Dropbox folder and permissions")
         
         st.divider()
         
         # Admin panel
         with st.expander("🔒 Admin Panel"):
-            st.write("**Dropbox Integration Management**")
+            st.write("**Dropbox OAuth Management**")
             
             admin_password = st.text_input("Admin Password:", type="password", key="admin_password_input")
             correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")
@@ -591,12 +613,25 @@ def show_main_app():
             if admin_password == correct_password:
                 st.success("✅ Admin access granted")
                 
+                # OAuth status
+                st.subheader("🔐 OAuth Status")
+                if st.session_state.get('dropbox_authenticated', False):
+                    st.success("✅ User authenticated with Dropbox")
+                    if st.button("🚪 Revoke Dropbox Access", type="secondary"):
+                        if 'dropbox_access_token' in st.session_state:
+                            del st.session_state.dropbox_access_token
+                        st.session_state.dropbox_authenticated = False
+                        st.success("Dropbox access revoked")
+                        st.rerun()
+                else:
+                    st.warning("❌ User not authenticated with Dropbox")
+                
                 if knowledge_base:
                     st.subheader("📄 Dropbox Documents")
                     for idx, doc in enumerate(knowledge_base):
                         with st.expander(f"📄 {doc['name']}"):
                             st.write(f"**File:** {doc['name']}")
-                            st.write(f"**Source:** Dropbox")
+                            st.write(f"**Source:** Dropbox OAuth")
                             st.write(f"**Size:** {doc.get('size', 'Unknown')} bytes")
                             st.write(f"**Modified:** {doc.get('modified', 'Unknown')}")
                             st.write(f"**Path:** {doc.get('path', 'Unknown')}")
@@ -605,11 +640,12 @@ def show_main_app():
                 
                 st.divider()
                 
-                st.subheader("⚙️ Dropbox Configuration Status")
+                st.subheader("⚙️ OAuth Configuration Status")
                 
-                # Show configuration status
                 config_items = [
-                    ("DROPBOX_ACCESS_TOKEN", "Dropbox Access Token"),
+                    ("DROPBOX_CLIENT_ID", "Dropbox Client ID"),
+                    ("DROPBOX_CLIENT_SECRET", "Dropbox Client Secret"),
+                    ("DROPBOX_REDIRECT_URI", "Redirect URI"),
                     ("DROPBOX_FOLDER_PATH", "Dropbox Folder Path")
                 ]
                 
@@ -618,17 +654,20 @@ def show_main_app():
                     if value:
                         st.success(f"✅ {description}: Configured")
                     else:
-                        if env_var == "DROPBOX_FOLDER_PATH":
-                            st.info(f"ℹ️ {description}: Using default (/MAGnus)")
+                        if env_var in ["DROPBOX_REDIRECT_URI", "DROPBOX_FOLDER_PATH"]:
+                            default_val = "http://localhost:8501" if env_var == "DROPBOX_REDIRECT_URI" else "/MAGnus"
+                            st.info(f"ℹ️ {description}: Using default ({default_val})")
                         else:
                             st.error(f"❌ {description}: Missing")
                 
                 st.divider()
                 
-                st.subheader("📋 Quick Reference")
+                st.subheader("📋 Configuration Reference")
                 st.code('''
 # Add these to your Streamlit secrets:
-DROPBOX_ACCESS_TOKEN = "your-dropbox-access-token"
+DROPBOX_CLIENT_ID = "your-dropbox-app-key"
+DROPBOX_CLIENT_SECRET = "your-dropbox-app-secret"
+DROPBOX_REDIRECT_URI = "http://localhost:8501"  # or your deployed URL
 DROPBOX_FOLDER_PATH = "/MAGnus"
 
 # Login credentials
@@ -656,7 +695,6 @@ ADMIN_PASSWORD = "your-admin-password"
                 st.session_state.current_category = None
                 st.rerun()
 
-        # Show conversation restart option
         if st.session_state.conversation_state != "initial":
             if st.button("🔄 Start New Conversation", key="restart_conversation"):
                 st.session_state.messages = []
@@ -714,7 +752,6 @@ ADMIN_PASSWORD = "your-admin-password"
         
         # Handle different conversation states
         if st.session_state.conversation_state == "initial":
-            # Show initial categorization
             with st.chat_message("assistant"):
                 response = """I'm here to help! To provide you with the best assistance, please let me know what type of request this is:
 
@@ -730,7 +767,6 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
                 st.session_state.conversation_state = "categorizing"
         
         elif st.session_state.conversation_state == "categorizing":
-            # Process categorization
             user_choice = user_input.lower().strip()
             
             with st.chat_message("assistant"):
@@ -786,7 +822,6 @@ This form ensures your idea gets to the right people and receives proper conside
                     st.session_state.messages.append({"role": "assistant", "content": response})
         
         elif st.session_state.conversation_state in ["waiting_for_issue", "waiting_for_problem", "categorized"]:
-            # Handle regular document search for questions, issues, and problems
             if not AZURE_OPENAI_AVAILABLE:
                 with st.chat_message("assistant"):
                     st.error("AI service is not available.")
@@ -799,7 +834,6 @@ This form ensures your idea gets to the right people and receives proper conside
                             st.error("AI service is not configured.")
                     else:
                         with st.chat_message("assistant"):
-                            # Show thinking indicator
                             with st.spinner("🤔 Searching through company documents..."):
                                 placeholder = st.empty()
                                 full_response = ""
@@ -835,14 +869,12 @@ Your role is to be a reliable source of company-specific information only."""
                                 # Call Azure OpenAI API
                                 stream, error = call_openai_api(messages_for_api)
                             
-                            # Clear the thinking indicator and show response
                             if error:
                                 error_msg = f"AI Error: {error}"
                                 st.error(error_msg)
                                 placeholder.markdown(error_msg)
                             elif stream:
                                 try:
-                                    # Stream the response with better error handling
                                     for chunk in stream:
                                         if (hasattr(chunk, 'choices') and 
                                             len(chunk.choices) > 0 and 
@@ -854,16 +886,14 @@ Your role is to be a reliable source of company-specific information only."""
                                             full_response += delta
                                             placeholder.markdown(full_response + "▌")
                                     
-                                    # Final response without cursor
                                     placeholder.markdown(full_response)
                                     
-                                    # Add to message history
                                     st.session_state.messages.append({
                                         "role": "assistant", 
                                         "content": full_response
                                     })
                                     
-                                    # After providing answer for issues/problems, ask if it helped
+                                    # Follow-up for issues/problems
                                     if st.session_state.conversation_state in ["waiting_for_issue", "waiting_for_problem"]:
                                         if "cannot find that information" not in full_response.lower():
                                             follow_up = f"\n\n---\n\nDid this information help resolve your {st.session_state.current_category}? If not, you can submit an **[Innovation Request](https://www.jotform.com/form/250841782712054)** to get additional support."
@@ -907,15 +937,22 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
     st.markdown("---")
     st.markdown(
         "<div style='text-align: center; color: gray; font-size: 0.8em;'>"
-        f"MAGnus Knowledge Bot • {len(knowledge_base)} documents • Secured with Login"
+        f"MAGnus Knowledge Bot • {len(knowledge_base)} documents • Secured with OAuth 2.0"
         "</div>", 
         unsafe_allow_html=True
     )
 
-# Main app logic
-if not st.session_state.authenticated:
-    show_login()
-elif not st.session_state.loading_complete:
-    show_loading()
-else:
-    show_main_app()
+# Main app logic with OAuth callback handling
+if __name__ == "__main__":
+    # Handle OAuth callback first
+    handle_oauth_callback()
+    
+    # Main app flow
+    if not st.session_state.authenticated:
+        show_login()
+    elif st.session_state.authenticated and not st.session_state.get('dropbox_authenticated', False):
+        show_dropbox_auth()
+    elif not st.session_state.loading_complete:
+        show_loading()
+    else:
+        show_main_app()
