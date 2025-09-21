@@ -189,6 +189,28 @@ class GoogleDriveAPI:
                 except Exception as e:
                     return f"Error processing PDF: {str(e)}"
             
+            
+            elif file_name.lower().endswith('.jsonl') or mime_type == 'application/json':
+                # Handle JSONL knowledge base files: one JSON object per line
+                try:
+                    text_accum = []
+                    for line in content.decode('utf-8', errors='ignore').splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                            # Prefer KB fields; fall back to generic content
+                            snippet = obj.get('body_md') or obj.get('content') or obj.get('text') or ''
+                            if snippet:
+                                text_accum.append(snippet)
+                        except Exception:
+                            # tolerate non-JSON lines
+                            continue
+                    return "\n\n".join(text_accum).strip() if text_accum else ""
+                except Exception as e:
+                    return f"Error processing JSONL: {str(e)}"
+
             elif mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
                 # Handle DOCX files
                 try:
@@ -243,7 +265,8 @@ class GoogleDriveConnector:
                 'application/pdf',
                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                 'application/vnd.google-apps.document',
-                'application/vnd.google-apps.spreadsheet'
+                'application/vnd.google-apps.spreadsheet',
+                'application/json'
             ]
             
             for file_data in files:
