@@ -44,7 +44,7 @@ def extract_doc_text(doc: dict) -> str:
     return ""
 
 @st.cache_data(ttl=1800)
-def load_knowledge_base_incremental():
+def load_knowledge_base():
     docs = []
     if not GOOGLE_DRIVE_AVAILABLE:
         return docs, "Google Drive module not available."
@@ -68,7 +68,6 @@ def load_knowledge_base_incremental():
                 data = []
             try:
                 for d in data:
-                    # Ensure minimal shape and attach a normalized text field for speed later
                     d = dict(d)
                     d["_normalized_text"] = extract_doc_text(d)
                     docs.append(d)
@@ -88,18 +87,80 @@ def call_openai_api(messages):
         return None, "Azure OpenAI library not available"
     api_key = get_secret("AZURE_OPENAI_API_KEY")
     endpoint = get_secret("AZURE_OPENAI_ENDPOINT")
-    deployment_name = get_secret("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1-mini")
+    deployment = get_secret("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1-mini")
     api_version = get_secret("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
     if not api_key or not endpoint:
         return None, "Missing Azure OpenAI credentials"
     try:
         client = AzureOpenAI(api_key=api_key, api_version=api_version, azure_endpoint=endpoint)
         stream = client.chat.completions.create(
-            model=deployment_name, messages=messages, stream=True, temperature=0.3, max_tokens=1500
+            model=deployment, messages=messages, stream=True, temperature=0.2, max_tokens=1800
         )
         return stream, None
     except Exception as e:
         return None, f"Azure OpenAI API error: {str(e)}"
+
+# ---------- Ranking & Snippets ----------
+def tokenize_query(q: str):
+    q = (q or "").lower()
+    tokens = [t.strip(",.!?;:()[]{}\"'") for t in q.split()]
+    # keep tokens length >= 3
+    toks = sorted(set([t for t in tokens if len(t) >= 3]))
+    # also keep bigrams for phrases like "pulse claim"
+    bigrams = []
+    for i in range(len(tokens)-1):
+        a, b = tokens[i], tokens[i+1]
+        if len(a) >= 3 and len(b) >= 3:
+            bigrams.append(a + " " + b)
+    return toks, bigrams
+
+def score_doc(doc, tokens, bigrams):
+    name = (doc.get("name") or doc.get("title") or "").lower()
+    text = (doc.get("_normalized_text") or "").lower()
+    score = 0
+    for t in tokens:
+        score += name.count(t) * 3   # boost title matches
+        score += text.count(t)
+    for bg in bigrams:
+        score += name.count(bg) * 5  # even bigger boost for phrase in title
+        score += text.count(bg) * 2  # phrase in body
+    # small boost for explicit priority
+    score += max(0, 4 - int(doc.get("priority", 3)))
+    return score
+
+def extract_snippet(text: str, tokens, bigrams, max_len=8000, window=1200):
+    """Return a snippet centered around the first hit of any bigram or token; fallback to head."""
+    if not text:
+        return ""
+    t = text
+    low = t.lower()
+    # Try bigrams first
+    idx = -1
+    which = None
+    for bg in bigrams:
+        idx = low.find(bg)
+        if idx != -1:
+            which = bg
+            break
+    # Then tokens
+    if idx == -1:
+        for tok in tokens:
+            idx = low.find(tok)
+            if idx != -1:
+                which = tok
+                break
+    # No hit? return head
+    if idx == -1:
+        return t[:max_len]
+    # Center a window around the hit
+    start = max(0, idx - window)
+    end = min(len(t), idx + window)
+    snippet = t[start:end]
+    # If still too long, trim
+    if len(snippet) > max_len:
+        snippet = snippet[:max_len]
+    # add a tiny header so model knows this is an excerpt
+    return f"...[excerpt around '{which}']...\n" + snippet
 
 # ---------- State ----------
 for k, v in [
@@ -149,8 +210,8 @@ def show_loading():
     prog = st.progress(0)
     status = st.empty()
     status.text("Connecting to Google Drive...")
-    prog.progress(15)
-    docs, err = load_knowledge_base_incremental()
+    prog.progress(20)
+    docs, err = load_knowledge_base()
     if err:
         st.error(f"❌ Error loading documents: {err}")
         c1, c2 = st.columns(2)
@@ -268,45 +329,50 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
                 st.error("AI service is not available.")
             return
 
-        # Build compact context using normalized text
         kb = st.session_state.knowledge_base
-        knowledge_context = ""
-        if kb:
-            q = user_input.lower()
-            filtered = [d for d in kb if any(
-                kw in (d.get("_normalized_text") or '').lower()
-                for kw in q.split() if len(kw) > 3
-            )]
-            cands = filtered if filtered else kb
-            # sort by explicit priority if present else default 3
-            cands = sorted(cands, key=lambda x: x.get('priority', 3))
+        tokens, bigrams = tokenize_query(user_input)
+        # Rank documents by query relevance
+        scored = [(score_doc(d, tokens, bigrams), d) for d in kb]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        # Keep top N docs, but also drop zeros if we have at least one positive
+        positives = [d for s, d in scored if s > 0]
+        selected = positives[:8] if positives else [d for s,d in scored[:6]]
 
-            ctx, remaining = [], 20000  # character cap
-            used = 0
-            for doc in cands[:12]:
-                text = (doc.get("_normalized_text") or "")
-                if not text.strip():
-                    continue
-                snippet = text[:2000]
-                if used + len(snippet) > remaining:
-                    break
-                name = doc.get('name') or doc.get('title') or '(untitled)'
-                ctx.append(f"Document: {name} (Priority: {doc.get('priority','Unknown')})\n{snippet}")
-                used += len(snippet)
-            knowledge_context = "\n\n".join(ctx)
+        # Show matched docs & scores in sidebar
+        st.sidebar.write("Matched docs:")
+        for s, d in scored[:8]:
+            name = d.get("name") or d.get("title") or "(untitled)"
+            st.sidebar.write(f"- {name} (score {s})")
+
+        # Build context with targeted snippets around the hits
+        context_cap = 32000  # character cap
+        used = 0
+        chunks = []
+        for d in selected:
+            name = d.get("name") or d.get("title") or "(untitled)"
+            text = d.get("_normalized_text") or ""
+            snippet = extract_snippet(text, tokens, bigrams, max_len=8000, window=1600)
+            if not snippet:
+                continue
+            block = f"Document: {name}\n{snippet}"
+            if used + len(block) > context_cap:
+                break
+            chunks.append(block)
+            used += len(block)
+        knowledge_context = "\n\n".join(chunks)
 
         system_message = {
             "role": "system",
             "content": f"""You are a company knowledge base assistant. You ONLY provide information that can be found in the company documents provided to you.
 
-{f"COMPANY KNOWLEDGE BASE:\n{knowledge_context}" if knowledge_context else "You currently have access to loaded company documents, but no readable text was extracted from them. If you cannot find content relevant to the user's query in the provided context, say you cannot find it and suggest sharing or re-indexing the correct document."}
+{("COMPANY KNOWLEDGE BASE:\n" + knowledge_context) if knowledge_context else "You currently have access to loaded company documents. If you cannot find content relevant to the user's query in the provided context, say you cannot find it and suggest sharing or re-indexing the correct document."}
 
 IMPORTANT RESTRICTIONS:
 1. ONLY answer questions using information directly found in the company documents above
 2. If the answer is not in the company documents, respond with: "I cannot find that information in our company documents. Please contact your manager or HR for assistance with this question."
 3. Do NOT provide general advice, external information, or assumptions
 4. Do NOT make up information or provide answers based on general knowledge
-5. Always cite which specific document contains the information you're referencing
+5. Always cite which specific document contains the information you're referencing (by the 'Document:' label)
 6. If a question is partially covered in the documents, only answer the parts that are documented
 7. The documents are organized by priority - higher priority documents contain more essential information
 
