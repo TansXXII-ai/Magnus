@@ -24,11 +24,10 @@ load_css()
 def display_logo():
     """Display the MAGnus logo"""
     try:
-        # Try to load logo from various sources
-        logo_url = "https://raw.githubusercontent.com/yourusername/yourrepo/main/magnuslogo.png"  # Update with your GitHub path
-        st.markdown(f"""
+        # Use local logo file
+        st.markdown("""
         <div class="logo-container">
-            <img src="{logo_url}" alt="MAGnus Logo">
+            <img src="./magnuslogo.png" alt="MAGnus Logo">
         </div>
         """, unsafe_allow_html=True)
     except:
