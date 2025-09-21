@@ -25,7 +25,7 @@ header {visibility: hidden;}
 
 /* Custom button styling */
 .stButton > button {
-    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    background: #779eb8;
     color: white;
     border: none;
     border-radius: 12px;
@@ -37,8 +37,72 @@ header {visibility: hidden;}
 }
 
 .stButton > button:hover {
+    background: #6a8ba5;
     transform: translateY(-2px);
     box-shadow: 0 8px 25px -8px rgba(119, 158, 184, 0.4);
+}
+
+/* Custom Avatar Chips */
+.avatar-chip {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    color: white;
+    text-align: center;
+    min-width: 60px;
+    font-family: 'Inter', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+.avatar-chip.user {
+    background: #779eb8;
+}
+
+.avatar-chip.assistant {
+    background: #25255c;
+}
+
+/* Custom chat message layout */
+.chat-message-container {
+    display: flex;
+    flex-direction: column;
+    margin: 1rem 0;
+    padding: 1rem;
+    background: white;
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border-color);
+}
+
+.chat-message-container.user-message {
+    background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+    margin-left: 2rem;
+}
+
+.chat-message-container.assistant-message {
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    margin-right: 2rem;
+}
+
+.avatar-container {
+    display: flex;
+    justify-content: flex-start;
+    margin-bottom: 0.5rem;
+}
+
+.message-content {
+    font-family: 'Inter', sans-serif;
+    line-height: 1.6;
+    color: var(--text-dark);
+}
+
+/* Hide default Streamlit chat avatars when using custom */
+.custom-chat .stChatMessage img {
+    display: none;
 }
 
 /* Chat message styling */
@@ -48,6 +112,14 @@ header {visibility: hidden;}
     box-shadow: var(--shadow);
     margin: 0.5rem 0;
     border: 1px solid var(--border-color);
+}
+
+.stChatMessage[data-testid="chat-message-user"] .stChatMessage {
+    background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+}
+
+.stChatMessage[data-testid="chat-message-assistant"] .stChatMessage {
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
 }
 
 /* Logo container */
@@ -84,7 +156,28 @@ header {visibility: hidden;}
 
 /* Sidebar styling */
 .css-1d391kg {
-    background: var(--secondary-color);
+    background: #25255c !important;
+}
+
+.css-1d391kg .css-16huue1 {
+    color: white !important;
+}
+
+.css-1d391kg h3 {
+    color: white !important;
+}
+
+.css-1d391kg p {
+    color: white !important;
+}
+
+.css-1d391kg .css-10trblm {
+    color: white !important;
+}
+
+/* Sidebar text elements */
+.css-1d391kg * {
+    color: white !important;
 }
 
 /* Input styling */
