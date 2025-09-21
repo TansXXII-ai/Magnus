@@ -820,7 +820,6 @@ Your role is to be a reliable source of company-specific information only."""
     if knowledge_base:
         total_docs = len(knowledge_base)
         fast_files = len([d for d in knowledge_base if d.get('processing_speed') == 'fast'])
-        cached_files = len([d for d in knowledge_base if 'cached' in str(d.get('source', ''))])
         
         footer_parts.append(f"{total_docs} documents")
         
@@ -844,7 +843,7 @@ if not st.session_state.authenticated:
 elif not st.session_state.loading_complete:
     show_loading()
 else:
-    show_main_app()": "assistant", "content": response})
+    show_main_app()role": "assistant", "content": response})
                     st.session_state.conversation_state = "categorized"
                 
                 elif "change" in user_choice:
@@ -882,4 +881,154 @@ This form ensures your idea gets to the right people and receives proper conside
 • Type **Issue** if something isn't working
 • Type **Problem** if you're experiencing difficulties"""
                     st.markdown(response)
-                    st.session_state.messages.append({"role
+                    st.session_state.messages.append({"st.session_state.messages.append({"role": "assistant", "content": response})
+        
+        elif st.session_state.conversation_state in ["waiting_for_issue", "waiting_for_problem", "categorized"]:
+            # Check for positive/completion responses
+            positive_indicators = ['thank you', 'thanks', 'sorted', 'solved', 'fixed', 'resolved', 'perfect', 'great', 'awesome', 'excellent', 'done', 'good', 'helpful', 'appreciate']
+            user_lower = user_input.lower()
+            
+            if any(indicator in user_lower for indicator in positive_indicators):
+                with st.chat_message("assistant"):
+                    response = "You're welcome! I'm glad I could help. 😊\n\nStarting a fresh conversation for you..."
+                    st.markdown(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    
+                    # Clear the chat and reset state after a brief pause
+                    import time
+                    time.sleep(1)
+                    st.session_state.messages = []
+                    st.session_state.conversation_state = "initial"
+                    st.session_state.current_category = None
+                    st.rerun()
+            
+            elif not AZURE_OPENAI_AVAILABLE:
+                with st.chat_message("assistant"):
+                    st.error("AI service is not available.")
+            else:
+                try:
+                    api_key = os.getenv("AZURE_OPENAI_API_KEY")
+                    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+                    if not api_key or not endpoint:
+                        with st.chat_message("assistant"):
+                            st.error("AI service is not configured.")
+                    else:
+                        with st.chat_message("assistant"):
+                            with st.spinner("🤔 Searching through company documents..."):
+                                placeholder = st.empty()
+                                full_response = ""
+                                
+                                # Prepare knowledge base context with priority information
+                                knowledge_context = ""
+                                if knowledge_base:
+                                    # Sort documents by priority for context (high priority first)
+                                    sorted_docs = sorted(knowledge_base, key=lambda x: x.get('priority', 3))
+                                    knowledge_context = "\n\n".join([
+                                        f"Document: {doc['name']} (Source: Google Drive, Priority: {doc.get('priority', 'Unknown')})\n{doc['content']}" 
+                                        for doc in sorted_docs
+                                    ])
+                                
+                                # System message with knowledge base
+                                system_message = {
+                                    "role": "system", 
+                                    "content": f"""You are a company knowledge base assistant. You ONLY provide information that can be found in the company documents provided to you.
+
+{f"COMPANY KNOWLEDGE BASE:\n{knowledge_context}" if knowledge_context else "You don't currently have access to any company documents."}
+
+IMPORTANT RESTRICTIONS:
+1. ONLY answer questions using information directly found in the company documents above
+2. If the answer is not in the company documents, respond with: "I cannot find that information in our company documents. Please contact your manager or HR for assistance with this question."
+3. Do NOT provide general advice, external information, or assumptions
+4. Do NOT make up information or provide answers based on general knowledge
+5. Always cite which specific document contains the information you're referencing
+6. If a question is partially covered in the documents, only answer the parts that are documented
+7. The documents are organized by priority - higher priority documents contain more essential information
+
+Your role is to be a reliable source of company-specific information only."""
+                                }
+                                
+                                messages_for_api = [system_message] + st.session_state.messages
+                                
+                                # Call Azure OpenAI API
+                                stream, error = call_openai_api(messages_for_api)
+                            
+                            if error:
+                                error_msg = f"AI Error: {error}"
+                                st.error(error_msg)
+                                placeholder.markdown(error_msg)
+                            elif stream:
+                                try:
+                                    for chunk in stream:
+                                        if (hasattr(chunk, 'choices') and 
+                                            len(chunk.choices) > 0 and 
+                                            hasattr(chunk.choices[0], 'delta') and
+                                            hasattr(chunk.choices[0].delta, 'content') and
+                                            chunk.choices[0].delta.content is not None):
+                                            
+                                            delta = chunk.choices[0].delta.content
+                                            full_response += delta
+                                            placeholder.markdown(full_response + "▌")
+                                    
+                                    placeholder.markdown(full_response)
+                                    
+                                    st.session_state.messages.append({
+                                        "role": "assistant", 
+                                        "content": full_response
+                                    })
+                                    
+                                    # Follow-up for issues/problems
+                                    if st.session_state.conversation_state in ["waiting_for_issue", "waiting_for_problem"]:
+                                        if "cannot find that information" not in full_response.lower():
+                                            follow_up = f"\n\n---\n\nDid this information help resolve your {st.session_state.current_category}? If not, you can submit an **[Innovation Request](https://www.jotform.com/form/250841782712054)** to get additional support."
+                                            placeholder.markdown(full_response + follow_up)
+                                            st.session_state.messages[-1]["content"] += follow_up
+                                        else:
+                                            follow_up = f"\n\n---\n\nSince I couldn't find specific information about your {st.session_state.current_category}, I recommend submitting an **[Innovation Request](https://www.jotform.com/form/250841782712054)** to get proper support from our team."
+                                            placeholder.markdown(full_response + follow_up)
+                                            st.session_state.messages[-1]["content"] += follow_up
+                                        
+                                        st.session_state.conversation_state = "completed"
+                                    
+                                except Exception as e:
+                                    error_msg = f"Streaming Error: {str(e)}"
+                                    st.error(error_msg)
+                                    placeholder.markdown(error_msg)
+                
+                except Exception as e:
+                    with st.chat_message("assistant"):
+                        st.error(f"Unexpected error: {str(e)}")
+
+    # Footer with enhanced performance info
+    st.markdown("---")
+    
+    # Dynamic footer based on loaded documents and performance
+    footer_parts = []
+    footer_parts.append("MAGnus Knowledge Bot")
+    
+    if knowledge_base:
+        total_docs = len(knowledge_base)
+        fast_files = len([d for d in knowledge_base if d.get('processing_speed') == 'fast'])
+        
+        footer_parts.append(f"{total_docs} documents")
+        
+        if fast_files > 0:
+            footer_parts.append(f"{fast_files} optimized files")
+        
+        footer_parts.append("Smart Loading & Caching")
+    else:
+        footer_parts.append("Powered by Google Drive")
+    
+    st.markdown(
+        "<div style='text-align: center; color: gray; font-size: 0.8em;'>"
+        f"{' • '.join(footer_parts)}"
+        "</div>", 
+        unsafe_allow_html=True
+    )
+
+# Main app logic
+if not st.session_state.authenticated:
+    show_login()
+elif not st.session_state.loading_complete:
+    show_loading()
+else:
+    show_main_app()
