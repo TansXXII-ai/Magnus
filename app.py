@@ -116,15 +116,35 @@ def tokenize_query(q: str):
 def score_doc(doc, tokens, bigrams):
     name = (doc.get("name") or doc.get("title") or "").lower()
     text = (doc.get("_normalized_text") or "").lower()
+    
+    # DEBUG: Log what we're searching in
+    st.write(f"🔍 SCORING DEBUG for doc: {doc.get('name', 'Unknown')}")
+    st.write(f"   - Name: '{name}'")
+    st.write(f"   - Text length: {len(text)} chars")
+    st.write(f"   - Text preview: '{text[:200]}...'")
+    
     score = 0
     for t in tokens:
-        score += name.count(t) * 3   # boost title matches
-        score += text.count(t)
+        name_matches = name.count(t)
+        text_matches = text.count(t)
+        score += name_matches * 3   # boost title matches
+        score += text_matches
+        if name_matches > 0 or text_matches > 0:
+            st.write(f"   - Token '{t}': {name_matches} in name, {text_matches} in text")
+    
     for bg in bigrams:
-        score += name.count(bg) * 5  # even bigger boost for phrase in title
-        score += text.count(bg) * 2  # phrase in body
+        name_matches = name.count(bg)
+        text_matches = text.count(bg)
+        score += name_matches * 5  # even bigger boost for phrase in title
+        score += text_matches * 2  # phrase in body
+        if name_matches > 0 or text_matches > 0:
+            st.write(f"   - Bigram '{bg}': {name_matches} in name, {text_matches} in text")
+    
     # small boost for explicit priority
-    score += max(0, 4 - int(doc.get("priority", 3)))
+    priority_boost = max(0, 4 - int(doc.get("priority", 3)))
+    score += priority_boost
+    
+    st.write(f"   - Final score: {score} (priority boost: {priority_boost})")
     return score
 
 def extract_snippet(text: str, tokens, bigrams, max_len=8000, window=1200):
@@ -170,7 +190,7 @@ for k, v in [
     ("conversation_state", "initial"),
     ("current_category", None),
     ("last_loaded_at", None),
-    ("debug_mode", False),
+    ("debug_mode", True),  # Start with debug ON
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -251,6 +271,31 @@ def show_main_app():
 
     kb = st.session_state.knowledge_base
     docs_with_text = sum(1 for d in kb if d.get("_normalized_text"))
+    
+    # ALWAYS show debug info when debug mode is on
+    if st.session_state.debug_mode:
+        st.write("## 🔍 DEEP DEBUG ANALYSIS")
+        st.write(f"**Total documents loaded:** {len(kb)}")
+        st.write(f"**Documents with text content:** {docs_with_text}")
+        
+        if len(kb) == 0:
+            st.error("🚨 NO DOCUMENTS LOADED! Check Google Drive connection.")
+        elif docs_with_text == 0:
+            st.error("🚨 NO DOCUMENTS HAVE TEXT CONTENT! JSONL processing failed.")
+            st.write("**Raw document data:**")
+            for i, doc in enumerate(kb[:3]):
+                st.write(f"Document {i+1}:")
+                st.json(doc)
+        else:
+            st.write("**Sample documents with content:**")
+            for i, doc in enumerate(kb[:3]):
+                if doc.get("_normalized_text"):
+                    name = doc.get('name', 'Unknown')
+                    content = doc.get('_normalized_text', '')
+                    st.write(f"**{name}**")
+                    st.write(f"- Content length: {len(content)} chars")
+                    st.write(f"- Content preview: {content[:300]}...")
+                    st.write("---")
     
     # Enhanced sidebar with debug info
     st.sidebar.header("📚 Knowledge Base")
@@ -358,28 +403,31 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
 
         kb = st.session_state.knowledge_base
         
-        # Debug: Show knowledge base status
-        if st.session_state.debug_mode:
-            st.write(f"🔍 Debug: Knowledge base has {len(kb)} documents")
-            st.write(f"🔍 Debug: Documents with content: {sum(1 for d in kb if d.get('_normalized_text'))}")
+        # STOP HERE if no documents with content
+        if docs_with_text == 0:
+            with st.chat_message("assistant"):
+                st.error("🚨 No documents with content found! Cannot search knowledge base.")
+                st.markdown("**Troubleshooting steps:**")
+                st.markdown("1. Check that JSONL files are in the correct Google Drive folder")
+                st.markdown("2. Verify JSONL files have proper format")
+                st.markdown("3. Click 'Smart Refresh' to reload documents")
+                return
         
         tokens, bigrams = tokenize_query(user_input)
         
         if st.session_state.debug_mode:
-            st.write(f"🔍 Debug: Query tokens: {tokens}")
-            st.write(f"🔍 Debug: Query bigrams: {bigrams}")
+            st.write(f"🔍 **Query Analysis:**")
+            st.write(f"- Original query: '{user_input}'")
+            st.write(f"- Tokens (3+ chars): {tokens}")
+            st.write(f"- Bigrams: {bigrams}")
+            st.write("---")
         
         # Rank documents by query relevance
-        scored = [(score_doc(d, tokens, bigrams), d) for d in kb]
+        scored = []
+        for d in kb:
+            score = score_doc(d, tokens, bigrams)
+            scored.append((score, d))
         scored.sort(key=lambda x: x[0], reverse=True)
-        
-        if st.session_state.debug_mode:
-            st.write("🔍 Debug: Top 5 document scores:")
-            for i, (score, doc) in enumerate(scored[:5]):
-                name = doc.get('name', 'Unknown')[:50]
-                content_preview = doc.get('_normalized_text', '')[:100] + "..."
-                st.write(f"  {i+1}. Score: {score}, Doc: {name}")
-                st.write(f"     Content preview: {content_preview}")
         
         # Keep top N docs, but also drop zeros if we have at least one positive
         positives = [d for s, d in scored if s > 0]
@@ -409,18 +457,31 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
         knowledge_context = "\n\n".join(chunks)
         
         if st.session_state.debug_mode:
-            st.write(f"🔍 Debug: Built context with {len(chunks)} document chunks")
-            st.write(f"🔍 Debug: Total context length: {len(knowledge_context)} characters")
+            st.write(f"🔍 **Context Building:**")
+            st.write(f"- Built context with {len(chunks)} document chunks")
+            st.write(f"- Total context length: {len(knowledge_context)} characters")
             if knowledge_context:
-                st.write(f"🔍 Debug: Context preview: {knowledge_context[:500]}...")
+                st.write(f"- Context preview: {knowledge_context[:500]}...")
+                st.write("✅ CONTEXT SUCCESSFULLY BUILT")
             else:
-                st.write("🔍 Debug: ⚠️ NO CONTEXT BUILT - This is the problem!")
+                st.write("🚨 NO CONTEXT BUILT - This means no relevant content was found!")
+
+        # STOP if no context
+        if not knowledge_context:
+            with st.chat_message("assistant"):
+                st.markdown("I cannot find information relevant to your query in our company documents. This could mean:")
+                st.markdown("- The information isn't in the loaded documents")
+                st.markdown("- The search terms don't match the document content")
+                st.markdown("- The documents weren't processed correctly")
+                st.markdown("\nPlease contact your manager or HR for assistance with this question.")
+                return
 
         system_message = {
             "role": "system",
             "content": f"""You are a company knowledge base assistant. You ONLY provide information that can be found in the company documents provided to you.
 
-{("COMPANY KNOWLEDGE BASE:\n" + knowledge_context) if knowledge_context else "You currently have access to loaded company documents. If you cannot find content relevant to the user's query in the provided context, say you cannot find it and suggest sharing or re-indexing the correct document."}
+COMPANY KNOWLEDGE BASE:
+{knowledge_context}
 
 IMPORTANT RESTRICTIONS:
 1. ONLY answer questions using information directly found in the company documents above
