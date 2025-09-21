@@ -844,8 +844,7 @@ if not st.session_state.authenticated:
 elif not st.session_state.loading_complete:
     show_loading()
 else:
-    show_main_app()
-                    st.session_state.messages.append({"role": "assistant", "content": response})
+    show_main_app()": "assistant", "content": response})
                     st.session_state.conversation_state = "categorized"
                 
                 elif "change" in user_choice:
@@ -883,3 +882,4 @@ This form ensures your idea gets to the right people and receives proper conside
 • Type **Issue** if something isn't working
 • Type **Problem** if you're experiencing difficulties"""
                     st.markdown(response)
+                    st.session_state.messages.append({"role
