@@ -61,6 +61,21 @@ def get_or_create_assistant(client):
         """)
         return None
 
+def get_time_greeting():
+    """Get time-appropriate greeting"""
+    import datetime
+    now = datetime.datetime.now()
+    hour = now.hour
+    
+    if 5 <= hour < 12:
+        return "this morning"
+    elif 12 <= hour < 17:
+        return "this afternoon"
+    elif 17 <= hour < 21:
+        return "this evening"
+    else:
+        return "today"
+
 def create_thread_and_run(client, assistant_id, messages):
     """Create a thread and run with the assistant"""
     try:
@@ -237,28 +252,95 @@ def show_main_app():
         st.sidebar.write(f"Messages: {len(st.session_state.messages)}")
         st.sidebar.write(f"State: {st.session_state.conversation_state}")
 
-    # Initial welcome
+    # Initial welcome with time-based greeting
     if not st.session_state.messages and st.session_state.conversation_state == "initial":
-        welcome = """👋 Welcome to MAGnus Knowledge Bot!
+        time_greeting = get_time_greeting()
+        welcome = f"""Hey there! How are you doing {time_greeting}? 
 
-I'm here to help! To provide you with the best assistance, please let me know what type of request this is:
-
-🤔 **Question** - I need information or guidance
-📄 **Change** - I want to suggest an improvement or new feature  
-⚠️ **Issue** - Something isn't working as expected
-🔧 **Problem** - I'm experiencing a technical difficulty
-
-Please type one of these options: **Question**, **Change**, **Issue**, or **Problem**"""
+I'm MAGnus, your friendly AI assistant here to help with anything work-related. What can I help you with?"""
         st.session_state.messages.append({"role": "assistant", "content": welcome})
-        st.session_state.conversation_state = "categorizing"
+        st.session_state.conversation_state = "show_options"
 
     # Chat history
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
-    # Input
-    placeholder = "Type your question here..." if st.session_state.conversation_state != "initial" else "Hello! How can I help you today?"
+    # Show option buttons after welcome
+    if st.session_state.conversation_state == "show_options":
+        st.markdown("### What can I help you with?")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🤔 I have a Question", use_container_width=True):
+                st.session_state.conversation_state = "confirm_question"
+                st.rerun()
+            if st.button("⚠️ I have an Issue", use_container_width=True):
+                st.session_state.conversation_state = "confirm_issue"
+                st.rerun()
+        
+        with col2:
+            if st.button("📄 I want to suggest a Change", use_container_width=True):
+                st.session_state.conversation_state = "confirm_change"
+                st.rerun()
+            if st.button("🔧 I have a Problem", use_container_width=True):
+                st.session_state.conversation_state = "confirm_problem"
+                st.rerun()
+        return
+
+    # Confirmation flows
+    if st.session_state.conversation_state.startswith("confirm_"):
+        category = st.session_state.conversation_state.replace("confirm_", "")
+        category_text = {
+            "question": "Question - you need information or guidance",
+            "change": "Change - you want to suggest an improvement",
+            "issue": "Issue - something isn't working as expected", 
+            "problem": "Problem - you're experiencing a technical difficulty"
+        }
+        
+        with st.chat_message("assistant"):
+            st.markdown(f"You've chosen **{category_text[category]}**. Is that correct?")
+        
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button("✅ Yes, that's right", use_container_width=True):
+                st.session_state.current_category = category
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": f"You've chosen **{category_text[category]}**. Is that correct?"
+                })
+                st.session_state.messages.append({
+                    "role": "user", 
+                    "content": "Yes, that's right"
+                })
+                
+                if category == "change":
+                    msg = ("Perfect! I love hearing improvement ideas.\n\nThe best way to submit your suggestion is through our Innovation Request form:\n\n🔗 **[Submit Innovation Request](https://www.jotform.com/form/250841782712054)**\n\nThis ensures your idea gets to the right people and gets proper consideration.")
+                    st.session_state.messages.append({"role": "assistant", "content": msg})
+                    st.session_state.conversation_state = "completed"
+                else:
+                    if category == "question":
+                        msg = "Great! What would you like to know? Just ask me anything about work processes, systems, or policies."
+                    elif category == "issue":
+                        msg = "I understand you're having an issue. Can you tell me what's happening? I'll help you figure it out."
+                    else:  # problem
+                        msg = "I'm here to help with your problem. What's going wrong? Let me see what I can find to help."
+                    
+                    st.session_state.messages.append({"role": "assistant", "content": msg})
+                    st.session_state.conversation_state = "ready_for_questions"
+                st.rerun()
+        
+        with col2:
+            if st.button("❌ No, let me choose again", use_container_width=True):
+                st.session_state.conversation_state = "show_options"
+                st.rerun()
+        return
+
+    # Input for questions
+    if st.session_state.conversation_state == "ready_for_questions":
+        placeholder = "Type your question here..."
+    else:
+        placeholder = "Hello! How can I help you today?"
     user_input = st.chat_input(placeholder)
     if not user_input:
         return
@@ -267,55 +349,8 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    state = st.session_state.conversation_state
-    
-    if state == "initial":
-        with st.chat_message("assistant"):
-            st.markdown(st.session_state.messages[0]["content"])
-            st.session_state.conversation_state = "categorizing"
-        return
-
-    if state == "categorizing":
-        choice = user_input.lower().strip()
-        with st.chat_message("assistant"):
-            if "question" in choice:
-                st.session_state.current_category = "question"
-                msg = "Perfect! What would you like to know? Please ask your question and I'll search through our company documents to find the answer."
-                st.markdown(msg)
-                st.session_state.messages.append({"role": "assistant", "content": msg})
-                st.session_state.conversation_state = "categorized"
-            elif "change" in choice:
-                st.session_state.current_category = "change"
-                msg = ("That's fantastic! We love hearing improvement ideas from our team.\n\n"
-                       "Submit via **Innovation Request**:\n\n"
-                       "🔗 **[Submit Innovation Request](https://www.jotform.com/form/250841782712054)**")
-                st.markdown(msg)
-                st.session_state.messages.append({"role": "assistant", "content": msg})
-                st.session_state.conversation_state = "completed"
-            elif "issue" in choice:
-                st.session_state.current_category = "issue"
-                msg = "I understand you're experiencing an issue. Please describe what's happening in detail, and I'll search our documentation to help resolve it."
-                st.markdown(msg)
-                st.session_state.messages.append({"role": "assistant", "content": msg})
-                st.session_state.conversation_state = "waiting_for_issue"
-            elif "problem" in choice:
-                st.session_state.current_category = "problem"
-                msg = "I'm here to help with your problem. Please explain what's going wrong, and I'll look through our resources to find a solution."
-                st.markdown(msg)
-                st.session_state.messages.append({"role": "assistant", "content": msg})
-                st.session_state.conversation_state = "waiting_for_problem"
-            else:
-                msg = ("I didn't quite catch that. Please choose one of these options:\n\n"
-                       "• Type **Question** if you need information\n"
-                       "• Type **Change** if you want to suggest an improvement  \n"
-                       "• Type **Issue** if something isn't working\n"
-                       "• Type **Problem** if you're experiencing difficulties")
-                st.markdown(msg)
-                st.session_state.messages.append({"role": "assistant", "content": msg})
-        return
-
-    # Question / Issue / Problem handling with Azure Assistant
-    if state in ["waiting_for_issue", "waiting_for_problem", "categorized"]:
+    # Handle questions with the Azure Assistant
+    if st.session_state.conversation_state == "ready_for_questions":
         if not AZURE_OPENAI_AVAILABLE:
             with st.chat_message("assistant"):
                 st.error("AI service is not available.")
@@ -343,7 +378,7 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
                 })
 
         with st.chat_message("assistant"):
-            with st.spinner("🤔 Searching through company documents..."):
+            with st.spinner("Let me check our company documents for you..."):
                 # Create thread and run
                 thread_id, run_id = create_thread_and_run(
                     client, 
