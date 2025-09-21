@@ -17,13 +17,6 @@ try:
 except ImportError:
     AZURE_OPENAI_AVAILABLE = False
 
-# Import Dropbox
-try:
-    import dropbox
-    DROPBOX_AVAILABLE = True
-except ImportError:
-    DROPBOX_AVAILABLE = False
-
 # Import Google Drive
 try:
     from google_drive_api import GoogleDriveConnector
@@ -51,148 +44,6 @@ try:
 except ImportError:
     pass
 
-# Dropbox API functions (keeping existing functionality)
-class DropboxConnector:
-    def __init__(self):
-        self.access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
-        self.folder_path = os.getenv("DROPBOX_FOLDER_PATH", "/MAGnus")
-        self.dbx = None
-        
-        if self.access_token and DROPBOX_AVAILABLE:
-            self.dbx = dropbox.Dropbox(self.access_token)
-    
-    def get_documents(self):
-        """Fetch documents from Dropbox folder"""
-        if not self.dbx:
-            return []
-        
-        try:
-            documents = []
-            
-            # List files in the specified folder
-            result = self.dbx.files_list_folder(self.folder_path)
-            
-            for entry in result.entries:
-                if isinstance(entry, dropbox.files.FileMetadata):
-                    # Process multiple file types
-                    file_extension = entry.name.lower().split('.')[-1]
-                    
-                    if file_extension in ['txt', 'md', 'csv', 'pdf', 'docx']:
-                        content = self.get_file_content(entry.path_lower, file_extension)
-                        if content and not content.startswith("Cannot process") and not content.startswith("Error"):
-                            documents.append({
-                                'name': entry.name,
-                                'content': content,
-                                'source': 'dropbox',
-                                'modified': entry.server_modified.isoformat() if entry.server_modified else '',
-                                'size': entry.size,
-                                'path': entry.path_lower,
-                                'type': file_extension
-                            })
-            
-            return documents
-            
-        except dropbox.exceptions.AuthError:
-            raise Exception("Dropbox authentication failed. Check your access token.")
-        except dropbox.exceptions.ApiError as e:
-            raise Exception(f"Dropbox API error: {str(e)}")
-        except Exception as e:
-            raise Exception(f"Error fetching Dropbox documents: {str(e)}")
-    
-    def get_file_content(self, file_path, file_extension):
-        """Get content of a specific file based on its type"""
-        try:
-            _, response = self.dbx.files_download(file_path)
-            
-            if file_extension in ['txt', 'md', 'csv']:
-                # Text files
-                content = response.content.decode('utf-8')
-                return content
-            
-            elif file_extension == 'pdf' and PDF_AVAILABLE:
-                # PDF files
-                import io
-                pdf_file = io.BytesIO(response.content)
-                
-                if hasattr(pypdf, 'PdfReader'):
-                    pdf_reader = pypdf.PdfReader(pdf_file)
-                else:
-                    pdf_reader = pypdf.PdfFileReader(pdf_file)
-                
-                text_content = ""
-                for page in pdf_reader.pages:
-                    text_content += page.extract_text() + "\n"
-                
-                return text_content.strip()
-            
-            elif file_extension == 'docx' and DOCX_AVAILABLE:
-                # DOCX files
-                import io
-                docx_file = io.BytesIO(response.content)
-                doc = Document(docx_file)
-                
-                text_content = ""
-                for paragraph in doc.paragraphs:
-                    text_content += paragraph.text + "\n"
-                
-                return text_content.strip()
-            
-            else:
-                # Unsupported file type or missing library
-                missing_libs = []
-                if file_extension == 'pdf' and not PDF_AVAILABLE:
-                    missing_libs.append("pypdf")
-                if file_extension == 'docx' and not DOCX_AVAILABLE:
-                    missing_libs.append("python-docx")
-                
-                if missing_libs:
-                    return f"Cannot process {file_extension.upper()} files. Missing libraries: {', '.join(missing_libs)}"
-                else:
-                    return f"Unsupported file type: {file_extension}"
-                    
-        except UnicodeDecodeError:
-            return f"File {file_path} contains binary data - cannot display as text"
-        except Exception as e:
-            return f"Error reading file {file_path}: {str(e)}"
-
-# Enhanced Dropbox connector with persistent token storage
-class EnhancedDropboxConnector(DropboxConnector):
-    def __init__(self):
-        super().__init__()
-        # Try to load persistent token first
-        self.load_persistent_token()
-    
-    def load_persistent_token(self):
-        """Load token from persistent storage (simulated with session state)"""
-        # In a real app, you might store this in encrypted browser storage
-        if 'persistent_dropbox_token' in st.session_state:
-            self.access_token = st.session_state.persistent_dropbox_token
-            if DROPBOX_AVAILABLE and self.access_token:
-                self.dbx = dropbox.Dropbox(self.access_token)
-    
-    def test_connection(self):
-        """Test if the current token works"""
-        if not self.dbx:
-            return False, "No connection available"
-        
-        try:
-            account_info = self.dbx.users_get_current_account()
-            return True, f"Connected as: {account_info.name.display_name}"
-        except Exception as e:
-            return False, str(e)
-    
-    def store_persistent_token(self, token):
-        """Store token for future sessions"""
-        st.session_state.persistent_dropbox_token = token
-        self.access_token = token
-        if DROPBOX_AVAILABLE:
-            self.dbx = dropbox.Dropbox(token)
-
-# Initialize Dropbox connector
-@st.cache_resource
-def get_dropbox_connector():
-    return EnhancedDropboxConnector()
-
 # Initialize Google Drive connector
 @st.cache_resource
 def get_google_drive_connector():
@@ -200,23 +51,13 @@ def get_google_drive_connector():
         return GoogleDriveConnector()
     return None
 
-# Load documents from multiple sources
+# Load documents from Google Drive
 @st.cache_data(ttl=1800)  # Cache for 30 minutes
 def load_knowledge_base():
-    """Load documents from configured sources (Dropbox, Google Drive)"""
+    """Load documents from Google Drive"""
     documents = []
     
-    # Try Dropbox first (existing functionality)
-    dropbox_token = os.getenv("DROPBOX_ACCESS_TOKEN")
-    if dropbox_token and DROPBOX_AVAILABLE:
-        try:
-            connector = get_dropbox_connector()
-            dropbox_docs = connector.get_documents()
-            documents.extend(dropbox_docs)
-        except Exception as e:
-            st.warning(f"Dropbox error: {str(e)}")
-    
-    # Try Google Drive if configured
+    # Load from Google Drive
     if GOOGLE_DRIVE_AVAILABLE:
         try:
             # Check if Google Drive credentials are configured
@@ -226,7 +67,7 @@ def load_knowledge_base():
                     google_docs = google_connector.get_documents()
                     documents.extend(google_docs)
         except Exception as e:
-            st.warning(f"Google Drive error: {str(e)}")
+            raise Exception(f"Error fetching Google Drive documents: {str(e)}")
     
     return documents
 
@@ -277,10 +118,7 @@ if "conversation_state" not in st.session_state:
 if "current_category" not in st.session_state:
     st.session_state.current_category = None
 
-if "dropbox_authenticated" not in st.session_state:
-    st.session_state.dropbox_authenticated = False
-
-# Enhanced login function with Google Drive integration
+# Login function with Google Drive integration
 def show_login():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -294,28 +132,12 @@ def show_login():
     st.markdown("""
     **Welcome to MAGnus Knowledge Bot**
     
-    Please log in to access the company knowledge base. Your document sources will be connected automatically.
+    Please log in to access the company knowledge base. Your Google Drive will be connected automatically.
     """)
     
-    # Check storage connections
+    # Check Google Drive connection
     storage_status = []
     
-    # Check Dropbox
-    connector = get_dropbox_connector()
-    has_persistent_token = 'persistent_dropbox_token' in st.session_state
-    
-    if has_persistent_token:
-        connected, message = connector.test_connection()
-        if connected:
-            storage_status.append(f"✅ Dropbox: {message}")
-        else:
-            storage_status.append(f"⚠️ Dropbox token expired")
-    elif os.getenv("DROPBOX_ACCESS_TOKEN"):
-        storage_status.append("🔄 Dropbox configured (will connect on login)")
-    else:
-        storage_status.append("ℹ️ Dropbox not configured")
-    
-    # Check Google Drive
     if GOOGLE_DRIVE_AVAILABLE:
         try:
             if "google" in st.secrets or "google_service_account" in st.secrets:
@@ -329,11 +151,11 @@ def show_login():
                 else:
                     storage_status.append("❌ Google Drive: Failed to initialize")
             else:
-                storage_status.append("ℹ️ Google Drive not configured")
+                storage_status.append("⚠️ Google Drive not configured")
         except Exception as e:
             storage_status.append(f"❌ Google Drive error: {str(e)}")
     else:
-        storage_status.append("ℹ️ Google Drive not available")
+        storage_status.append("❌ Google Drive not available")
     
     # Display storage status
     if storage_status:
@@ -358,43 +180,13 @@ def show_login():
                 st.session_state.authenticated = True
                 st.session_state.loading_complete = False
                 
-                # Automatic Dropbox connection
-                with st.spinner("🔗 Connecting to document sources..."):
-                    # First try persistent token
-                    if has_persistent_token:
-                        connected, message = connector.test_connection()
-                        if connected:
-                            st.session_state.dropbox_authenticated = True
-                        else:
-                            # Clear expired token
-                            if 'persistent_dropbox_token' in st.session_state:
-                                del st.session_state.persistent_dropbox_token
-                    
-                    # Try environment token
-                    env_token = os.getenv("DROPBOX_ACCESS_TOKEN")
-                    if env_token:
-                        connector.store_persistent_token(env_token)
-                        connected, message = connector.test_connection()
-                        if connected:
-                            st.session_state.dropbox_authenticated = True
-                    
-                    st.success("✅ Login successful! Document sources connected...")
+                with st.spinner("🔗 Connecting to Google Drive..."):
+                    st.success("✅ Login successful! Connecting to document sources...")
                     st.rerun()
             else:
                 st.error("Invalid username or password. Please try again.")
-    
-    # Option to clear stored token if needed
-    if has_persistent_token:
-        st.markdown("---")
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("🗑️ Clear Stored Dropbox Connection", help="Clear saved Dropbox token"):
-                if 'persistent_dropbox_token' in st.session_state:
-                    del st.session_state.persistent_dropbox_token
-                st.success("Stored Dropbox connection cleared")
-                st.rerun()
 
-# Enhanced loading function with multi-source support
+# Loading function
 def show_loading():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -410,86 +202,81 @@ def show_loading():
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    status_text.text("Initializing document sources...")
-    progress_bar.progress(10)
-    
-    # Check and connect to available sources
-    sources_connected = []
-    
-    # Check Dropbox
-    status_text.text("Checking Dropbox connection...")
-    progress_bar.progress(30)
-    
-    if DROPBOX_AVAILABLE and os.getenv("DROPBOX_ACCESS_TOKEN"):
-        try:
-            connector = get_dropbox_connector()
-            connected, message = connector.test_connection()
-            if connected:
-                sources_connected.append(f"Dropbox: {message}")
-            else:
-                st.warning(f"Dropbox: {message}")
-        except Exception as e:
-            st.warning(f"Dropbox error: {str(e)}")
+    status_text.text("Initializing Google Drive connection...")
+    progress_bar.progress(20)
     
     # Check Google Drive
-    status_text.text("Checking Google Drive connection...")
-    progress_bar.progress(50)
-    
     if GOOGLE_DRIVE_AVAILABLE:
         try:
             if "google" in st.secrets or "google_service_account" in st.secrets:
                 google_connector = get_google_drive_connector()
                 if google_connector:
+                    status_text.text("Testing Google Drive connection...")
+                    progress_bar.progress(40)
+                    
                     connected, message = google_connector.test_connection()
                     if connected:
-                        sources_connected.append(f"Google Drive: {message}")
+                        st.info(f"📱 Google Drive: {message}")
+                        
+                        status_text.text("Fetching documents from Google Drive...")
+                        progress_bar.progress(70)
+                        
+                        try:
+                            documents = load_knowledge_base()
+                            
+                            status_text.text("Processing documents...")
+                            progress_bar.progress(90)
+                            
+                            st.session_state.knowledge_base = documents
+                            
+                            progress_bar.progress(100)
+                            status_text.text(f"✅ Loaded {len(documents)} documents successfully!")
+                            
+                            st.session_state.loading_complete = True
+                            
+                            import time
+                            time.sleep(1)
+                            
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"❌ Error loading documents: {str(e)}")
+                            st.info("Please check your Google Drive configuration and try again.")
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.button("🔄 Retry"):
+                                    st.rerun()
+                            with col2:
+                                if st.button("🚪 Logout"):
+                                    logout()
+                            return
                     else:
-                        st.warning(f"Google Drive: {message}")
+                        st.error(f"❌ Google Drive connection failed: {message}")
+                        if st.button("🔙 Back to Login"):
+                            logout()
+                        return
+                else:
+                    st.error("❌ Failed to initialize Google Drive connector")
+                    if st.button("🔙 Back to Login"):
+                        logout()
+                    return
+            else:
+                st.error("❌ Google Drive credentials not configured")
+                if st.button("🔙 Back to Login"):
+                    logout()
+                return
         except Exception as e:
-            st.warning(f"Google Drive error: {str(e)}")
-    
-    if not sources_connected:
-        st.error("❌ No document sources available. Please check configuration.")
+            st.error(f"❌ Google Drive error: {str(e)}")
+            if st.button("🔙 Back to Login"):
+                logout()
+            return
+    else:
+        st.error("❌ Google Drive integration not available")
+        st.info("Please check that google_drive_api.py is present and requirements are installed")
         if st.button("🔙 Back to Login"):
             logout()
         return
-    
-    # Display connected sources
-    for source in sources_connected:
-        st.info(f"📱 {source}")
-    
-    status_text.text("Fetching document list...")
-    progress_bar.progress(70)
-    
-    try:
-        documents = load_knowledge_base()
-        
-        status_text.text("Processing documents...")
-        progress_bar.progress(90)
-        
-        st.session_state.knowledge_base = documents
-        
-        progress_bar.progress(100)
-        status_text.text(f"✅ Loaded {len(documents)} documents successfully!")
-        
-        st.session_state.loading_complete = True
-        
-        import time
-        time.sleep(1)
-        
-        st.rerun()
-        
-    except Exception as e:
-        st.error(f"❌ Error loading documents: {str(e)}")
-        st.info("Please check your document source configurations and try again.")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔄 Retry"):
-                st.rerun()
-        with col2:
-            if st.button("🚪 Logout"):
-                logout()
 
 # Logout function
 def logout():
@@ -497,8 +284,6 @@ def logout():
     st.session_state.loading_complete = False
     st.session_state.knowledge_base = []
     st.session_state.messages = []
-    st.session_state.dropbox_authenticated = False
-    # Note: We keep persistent_dropbox_token for faster re-login
     st.rerun()
 
 # Main app
@@ -542,19 +327,9 @@ def show_main_app():
         else:
             st.error("❌ Azure OpenAI Unavailable")
         
-        # Document source status
-        st.subheader("📁 Document Sources")
-        
-        # Dropbox status
-        dropbox_token = os.getenv("DROPBOX_ACCESS_TOKEN")
-        if dropbox_token and DROPBOX_AVAILABLE:
-            st.success("✅ Dropbox Available")
-        elif not dropbox_token:
-            st.info("ℹ️ Dropbox Not Configured")
-        elif not DROPBOX_AVAILABLE:
-            st.error("❌ Dropbox Library Missing")
-        
         # Google Drive status
+        st.subheader("📁 Document Source")
+        
         if GOOGLE_DRIVE_AVAILABLE:
             try:
                 if "google" in st.secrets or "google_service_account" in st.secrets:
@@ -570,28 +345,19 @@ def show_main_app():
                     else:
                         st.error("❌ Google Drive Failed to Initialize")
                 else:
-                    st.info("ℹ️ Google Drive Available (configure credentials)")
+                    st.warning("⚠️ Google Drive not configured")
             except Exception as e:
                 st.error(f"❌ Google Drive Error: {str(e)}")
         else:
-            st.info("ℹ️ Google Drive Available (install dependencies)")
+            st.error("❌ Google Drive not available")
         
         st.divider()
         
         st.header("📚 Knowledge Base")
         
         if knowledge_base:
-            # Show breakdown by source
-            dropbox_docs = [doc for doc in knowledge_base if doc.get('source') == 'dropbox']
-            google_docs = [doc for doc in knowledge_base if doc.get('source') == 'google_drive']
-            
             total_docs = len(knowledge_base)
-            st.success(f"✅ {total_docs} total documents loaded")
-            
-            if dropbox_docs:
-                st.caption(f"📦 {len(dropbox_docs)} from Dropbox")
-            if google_docs:
-                st.caption(f"🌐 {len(google_docs)} from Google Drive")
+            st.success(f"✅ {total_docs} documents loaded from Google Drive")
             
             if st.button("🔄 Refresh Documents", key="refresh_docs"):
                 st.cache_data.clear()
@@ -603,13 +369,13 @@ def show_main_app():
             
         else:
             st.warning("⚠️ No documents found")
-            st.info("Check document source configurations")
+            st.info("Check Google Drive folder and permissions")
         
         st.divider()
         
         # Admin panel
         with st.expander("🔒 Admin Panel"):
-            st.write("**Document Source Management**")
+            st.write("**Google Drive Document Management**")
             
             admin_password = st.text_input("Admin Password:", type="password", key="admin_password_input")
             correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")
@@ -618,46 +384,29 @@ def show_main_app():
                 st.success("✅ Admin access granted")
                 
                 if knowledge_base:
-                    # Dropbox Documents
-                    dropbox_docs = [doc for doc in knowledge_base if doc.get('source') == 'dropbox']
-                    if dropbox_docs:
-                        st.subheader("📦 Dropbox Documents")
-                        for idx, doc in enumerate(dropbox_docs):
-                            with st.expander(f"📦 {doc['name']}"):
-                                st.write(f"**File:** {doc['name']}")
-                                st.write(f"**Source:** Dropbox")
-                                st.write(f"**Size:** {doc.get('size', 'Unknown')} bytes")
-                                st.write(f"**Modified:** {doc.get('modified', 'Unknown')}")
-                                st.write(f"**Path:** {doc.get('path', 'Unknown')}")
-                                preview_text = doc['content'][:200] + "..." if len(doc['content']) > 200 else doc['content']
-                                st.text_area("Content preview:", preview_text, height=100, disabled=True, key=f"admin_dropbox_preview_{idx}")
-                    
-                    # Google Drive Documents
-                    google_docs = [doc for doc in knowledge_base if doc.get('source') == 'google_drive']
-                    if google_docs:
-                        st.subheader("🌐 Google Drive Documents")
-                        for idx, doc in enumerate(google_docs):
-                            with st.expander(f"🌐 {doc['name']}"):
-                                st.write(f"**File:** {doc['name']}")
-                                st.write(f"**Source:** Google Drive")
-                                st.write(f"**Size:** {doc.get('size', 'Unknown')} bytes")
-                                st.write(f"**Modified:** {doc.get('modified', 'Unknown')}")
-                                st.write(f"**Type:** {doc.get('mime_type', doc.get('type', 'Unknown'))}")
-                                if doc.get('path'):
-                                    st.markdown(f"**[View in Drive]({doc['path']})**")
-                                preview_text = doc['content'][:200] + "..." if len(doc['content']) > 200 else doc['content']
-                                st.text_area("Content preview:", preview_text, height=100, disabled=True, key=f"admin_google_preview_{idx}")
+                    st.subheader("🌐 Google Drive Documents")
+                    for idx, doc in enumerate(knowledge_base):
+                        with st.expander(f"🌐 {doc['name']}"):
+                            st.write(f"**File:** {doc['name']}")
+                            st.write(f"**Source:** Google Drive")
+                            st.write(f"**Size:** {doc.get('size', 'Unknown')} bytes")
+                            st.write(f"**Modified:** {doc.get('modified', 'Unknown')}")
+                            st.write(f"**Type:** {doc.get('mime_type', doc.get('type', 'Unknown'))}")
+                            if doc.get('path'):
+                                st.markdown(f"**[View in Drive]({doc['path']})**")
+                            preview_text = doc['content'][:200] + "..." if len(doc['content']) > 200 else doc['content']
+                            st.text_area("Content preview:", preview_text, height=100, disabled=True, key=f"admin_google_preview_{idx}")
                 
                 st.divider()
                 
                 st.subheader("⚙️ Configuration Status")
                 
                 config_items = [
-                    ("DROPBOX_ACCESS_TOKEN", "Dropbox Access Token"),
-                    ("DROPBOX_FOLDER_PATH", "Dropbox Folder Path"),
                     ("Google Service Account", "Google Drive Credentials"),
                     ("AZURE_OPENAI_API_KEY", "Azure OpenAI API Key"),
-                    ("AZURE_OPENAI_ENDPOINT", "Azure OpenAI Endpoint")
+                    ("AZURE_OPENAI_ENDPOINT", "Azure OpenAI Endpoint"),
+                    ("LOGIN_PASSWORD", "Login Password"),
+                    ("ADMIN_PASSWORD", "Admin Password")
                 ]
                 
                 for env_var, description in config_items:
@@ -671,20 +420,13 @@ def show_main_app():
                         if value:
                             st.success(f"✅ {description}: Configured")
                         else:
-                            if env_var == "DROPBOX_FOLDER_PATH":
-                                st.info(f"ℹ️ {description}: Using default (/MAGnus)")
-                            else:
-                                st.error(f"❌ {description}: Missing")
+                            st.error(f"❌ {description}: Missing")
                 
                 st.divider()
                 
                 st.subheader("📋 Configuration Reference")
                 st.code('''
 # Add these to your Streamlit secrets:
-
-# Dropbox Configuration
-DROPBOX_ACCESS_TOKEN = "your-dropbox-access-token"
-DROPBOX_FOLDER_PATH = "/MAGnus"
 
 # Google Drive Configuration
 google_service_account = """
@@ -771,7 +513,7 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
             export_data = {
                 "timestamp": datetime.now().isoformat(),
                 "knowledge_base_docs": [doc["name"] for doc in knowledge_base],
-                "knowledge_base_sources": list(set([doc.get("source", "unknown") for doc in knowledge_base])),
+                "knowledge_base_source": "google_drive",
                 "messages": st.session_state.messages
             }
             
@@ -906,7 +648,7 @@ This form ensures your idea gets to the right people and receives proper conside
                                 knowledge_context = ""
                                 if knowledge_base:
                                     knowledge_context = "\n\n".join([
-                                        f"Document: {doc['name']} (Source: {doc.get('source', 'unknown')})\n{doc['content']}" 
+                                        f"Document: {doc['name']} (Source: Google Drive)\n{doc['content']}" 
                                         for doc in knowledge_base
                                     ])
                                 
@@ -982,42 +724,16 @@ Your role is to be a reliable source of company-specific information only."""
     # Footer
     st.markdown("---")
     
-    # Dynamic footer based on connected sources
-    footer_parts = []
-    footer_parts.append("MAGnus Knowledge Bot")
-    
-    if knowledge_base:
-        total_docs = len(knowledge_base)
-        footer_parts.append(f"{total_docs} documents")
-        
-        # Show source breakdown
-        sources = {}
-        for doc in knowledge_base:
-            source = doc.get('source', 'unknown')
-            sources[source] = sources.get(source, 0) + 1
-        
-        source_text = []
-        for source, count in sources.items():
-            if source == 'dropbox':
-                source_text.append(f"{count} Dropbox")
-            elif source == 'google_drive':
-                source_text.append(f"{count} Google Drive")
-            else:
-                source_text.append(f"{count} {source}")
-        
-        if source_text:
-            footer_parts.append(f"({', '.join(source_text)})")
-    
-    footer_parts.append("Multi-Source Integration")
-    
+    # Clean footer for Google Drive only
+    total_docs = len(knowledge_base)
     st.markdown(
         "<div style='text-align: center; color: gray; font-size: 0.8em;'>"
-        f"{' • '.join(footer_parts)}"
+        f"MAGnus Knowledge Bot • {total_docs} documents from Google Drive • Powered by Azure OpenAI"
         "</div>", 
         unsafe_allow_html=True
     )
 
-# Main app logic - simplified flow
+# Main app logic
 if not st.session_state.authenticated:
     show_login()
 elif not st.session_state.loading_complete:
