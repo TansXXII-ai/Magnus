@@ -1,212 +1,147 @@
 import os
-import json
 import time
 import streamlit as st
 from datetime import datetime
 
 st.set_page_config(page_title="MAGnus - MA Group Knowledge Bot", page_icon="🤖", layout="wide")
 
-# ---------- Optional deps ----------
+# ---------- Dependencies ----------
 try:
     from openai import AzureOpenAI
     AZURE_OPENAI_AVAILABLE = True
 except Exception:
     AZURE_OPENAI_AVAILABLE = False
 
-try:
-    from google_drive_api import GoogleDriveConnector
-    GOOGLE_DRIVE_AVAILABLE = True
-except Exception:
-    GOOGLE_DRIVE_AVAILABLE = False
-
 # ---------- Utils ----------
 def get_secret(key, default=None):
     return os.getenv(key) or st.secrets.get(key, default)
 
 @st.cache_resource
-def get_google_drive_connector():
-    if GOOGLE_DRIVE_AVAILABLE:
-        try:
-            return GoogleDriveConnector()
-        except Exception:
-            return None
-    return None
-
-# Robust text extractor: many connectors use different keys
-TEXT_KEYS = ["content","text","body","raw","document_text","preview","snippet","extracted_text","_normalized_text"]
-
-def extract_doc_text(doc: dict) -> str:
-    for k in TEXT_KEYS:
-        v = doc.get(k)
-        if isinstance(v, str) and v.strip():
-            return v
-    return ""
-
-@st.cache_data(ttl=1800)
-def load_knowledge_base():
-    docs = []
-    if not GOOGLE_DRIVE_AVAILABLE:
-        return docs, "Google Drive module not available."
-    try:
-        if "google" in st.secrets or "google_service_account" in st.secrets:
-            conn = get_google_drive_connector()
-            if not conn:
-                return docs, "Failed to initialize Google Drive connector."
-
-            # Prefer incremental if available
-            if hasattr(conn, "get_documents_incremental"):
-                def progress_callback(processed, total, current):
-                    pass
-                data = conn.get_documents_incremental(progress_callback=progress_callback)
-            elif hasattr(conn, "get_documents"):
-                data = conn.get_documents()
-            else:
-                return docs, "Connector has no get_documents(_incremental) method."
-
-            if data is None:
-                data = []
-            try:
-                for d in data:
-                    d = dict(d)
-                    d["_normalized_text"] = extract_doc_text(d)
-                    docs.append(d)
-            except TypeError:
-                d = dict(data)
-                d["_normalized_text"] = extract_doc_text(d)
-                docs.append(d)
-
-            return docs, None
-        else:
-            return docs, "Google Drive credentials not configured."
-    except Exception as e:
-        return docs, f"Error fetching Google Drive documents: {str(e)}"
-
-def call_openai_api(messages):
+def get_azure_client():
+    """Initialize Azure OpenAI client"""
     if not AZURE_OPENAI_AVAILABLE:
-        return None, "Azure OpenAI library not available"
+        return None
+    
     api_key = get_secret("AZURE_OPENAI_API_KEY")
     endpoint = get_secret("AZURE_OPENAI_ENDPOINT")
-    deployment = get_secret("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1-mini")
-    api_version = get_secret("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+    api_version = get_secret("AZURE_OPENAI_API_VERSION", "2024-05-01-preview")
+    
     if not api_key or not endpoint:
-        return None, "Missing Azure OpenAI credentials"
+        return None
+    
+    return AzureOpenAI(
+        api_key=api_key,
+        api_version=api_version,
+        azure_endpoint=endpoint
+    )
+
+def get_or_create_assistant(client):
+    """Get existing assistant or create new one with file search"""
+    assistant_id = get_secret("AZURE_ASSISTANT_ID")
+    
+    if assistant_id:
+        # Use existing assistant
+        try:
+            assistant = client.beta.assistants.retrieve(assistant_id)
+            return assistant
+        except Exception as e:
+            st.error(f"Could not retrieve assistant {assistant_id}: {e}")
+            return None
+    else:
+        # Instructions for creating assistant in Azure AI Foundry
+        st.error("""
+        **Assistant not configured!**
+        
+        Please create an Assistant in Azure AI Foundry with:
+        1. Upload your documents to Data files
+        2. Create an Assistant with file search enabled
+        3. Add the Assistant ID to your secrets as 'AZURE_ASSISTANT_ID'
+        
+        See: https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/file-search
+        """)
+        return None
+
+def create_thread_and_run(client, assistant_id, messages):
+    """Create a thread and run with the assistant"""
     try:
-        client = AzureOpenAI(api_key=api_key, api_version=api_version, azure_endpoint=endpoint)
-        stream = client.chat.completions.create(
-            model=deployment, messages=messages, stream=True, temperature=0.2, max_tokens=1800
+        # Create thread with messages
+        thread = client.beta.threads.create(messages=messages)
+        
+        # Create run
+        run = client.beta.threads.runs.create(
+            thread_id=thread.id,
+            assistant_id=assistant_id
         )
-        return stream, None
+        
+        return thread.id, run.id
     except Exception as e:
-        return None, f"Azure OpenAI API error: {str(e)}"
+        st.error(f"Error creating thread and run: {e}")
+        return None, None
 
-# ---------- Ranking & Snippets ----------
-def tokenize_query(q: str):
-    q = (q or "").lower()
-    tokens = [t.strip(",.!?;:()[]{}\"'") for t in q.split()]
-    # keep tokens length >= 3
-    toks = sorted(set([t for t in tokens if len(t) >= 3]))
-    # also keep bigrams for phrases like "pulse claim"
-    bigrams = []
-    for i in range(len(tokens)-1):
-        a, b = tokens[i], tokens[i+1]
-        if len(a) >= 3 and len(b) >= 3:
-            bigrams.append(a + " " + b)
-    return toks, bigrams
+def wait_for_run_completion(client, thread_id, run_id, max_wait=60):
+    """Wait for assistant run to complete"""
+    start_time = time.time()
+    
+    while time.time() - start_time < max_wait:
+        try:
+            run = client.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run_id)
+            
+            if run.status == 'completed':
+                return True, run
+            elif run.status in ['failed', 'cancelled', 'expired']:
+                return False, run
+            elif run.status in ['queued', 'in_progress']:
+                time.sleep(1)
+                continue
+            else:
+                st.warning(f"Unknown run status: {run.status}")
+                time.sleep(1)
+                
+        except Exception as e:
+            st.error(f"Error checking run status: {e}")
+            return False, None
+    
+    return False, None  # Timeout
 
-def score_doc(doc, tokens, bigrams):
-    name = (doc.get("name") or doc.get("title") or "").lower()
-    text = (doc.get("_normalized_text") or "").lower()
-    
-    # DEBUG: Log what we're searching in
-    st.write(f"🔍 SCORING DEBUG for doc: {doc.get('name', 'Unknown')}")
-    st.write(f"   - Name: '{name}'")
-    st.write(f"   - Text length: {len(text)} chars")
-    st.write(f"   - Text preview: '{text[:200]}...'")
-    
-    score = 0
-    for t in tokens:
-        name_matches = name.count(t)
-        text_matches = text.count(t)
-        score += name_matches * 3   # boost title matches
-        score += text_matches
-        if name_matches > 0 or text_matches > 0:
-            st.write(f"   - Token '{t}': {name_matches} in name, {text_matches} in text")
-    
-    for bg in bigrams:
-        name_matches = name.count(bg)
-        text_matches = text.count(bg)
-        score += name_matches * 5  # even bigger boost for phrase in title
-        score += text_matches * 2  # phrase in body
-        if name_matches > 0 or text_matches > 0:
-            st.write(f"   - Bigram '{bg}': {name_matches} in name, {text_matches} in text")
-    
-    # small boost for explicit priority
-    priority_boost = max(0, 4 - int(doc.get("priority", 3)))
-    score += priority_boost
-    
-    st.write(f"   - Final score: {score} (priority boost: {priority_boost})")
-    return score
-
-def extract_snippet(text: str, tokens, bigrams, max_len=8000, window=1200):
-    """Return a snippet centered around the first hit of any bigram or token; fallback to head."""
-    if not text:
-        return ""
-    t = text
-    low = t.lower()
-    # Try bigrams first
-    idx = -1
-    which = None
-    for bg in bigrams:
-        idx = low.find(bg)
-        if idx != -1:
-            which = bg
-            break
-    # Then tokens
-    if idx == -1:
-        for tok in tokens:
-            idx = low.find(tok)
-            if idx != -1:
-                which = tok
-                break
-    # No hit? return head
-    if idx == -1:
-        return t[:max_len]
-    # Center a window around the hit
-    start = max(0, idx - window)
-    end = min(len(t), idx + window)
-    snippet = t[start:end]
-    # If still too long, trim
-    if len(snippet) > max_len:
-        snippet = snippet[:max_len]
-    # add a tiny header so model knows this is an excerpt
-    return f"...[excerpt around '{which}']...\n" + snippet
+def get_assistant_response(client, thread_id):
+    """Get the latest assistant message from thread"""
+    try:
+        messages = client.beta.threads.messages.list(thread_id=thread_id, limit=1)
+        if messages.data:
+            latest_message = messages.data[0]
+            if latest_message.role == 'assistant':
+                # Extract text content
+                content_parts = []
+                for content in latest_message.content:
+                    if content.type == 'text':
+                        content_parts.append(content.text.value)
+                return "\n".join(content_parts)
+        return None
+    except Exception as e:
+        st.error(f"Error retrieving assistant response: {e}")
+        return None
 
 # ---------- State ----------
 for k, v in [
     ("authenticated", False),
-    ("loading_complete", False),
-    ("knowledge_base", []),
+    ("assistant_ready", False),
     ("messages", []),
     ("conversation_state", "initial"),
     ("current_category", None),
-    ("last_loaded_at", None),
-    ("debug_mode", True),  # Start with debug ON
+    ("thread_id", None),
+    ("debug_mode", False),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
 
 def logout():
     st.session_state.authenticated = False
-    st.session_state.loading_complete = False
-    st.session_state.knowledge_base = []
+    st.session_state.assistant_ready = False
     st.session_state.messages = []
     st.session_state.conversation_state = "initial"
     st.session_state.current_category = None
-    st.cache_data.clear()
-    try:
-        st.cache_resource.clear()
-    except Exception:
-        pass
+    st.session_state.thread_id = None
+    st.cache_resource.clear()
     st.rerun()
 
 # ---------- Screens ----------
@@ -216,44 +151,65 @@ def show_login():
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         login_button = st.form_submit_button("🚀 Login & Connect", use_container_width=True)
+    
     if login_button:
         if username == "MAG" and st.secrets.get("LOGIN_PASSWORD", "defaultpassword") == password:
             st.session_state.authenticated = True
-            st.session_state.loading_complete = False
+            st.session_state.assistant_ready = False
             st.rerun()
         else:
             st.error("Invalid username or password. Please try again.")
 
-def show_loading():
+def show_assistant_setup():
     st.title("🤖 MAGnus Knowledge Bot")
-    st.markdown("### 📚 Loading Knowledge Base")
+    st.markdown("### 🔧 Setting up AI Assistant")
+    
     prog = st.progress(0)
     status = st.empty()
-    status.text("Connecting to Google Drive...")
-    prog.progress(20)
-    docs, err = load_knowledge_base()
-    if err:
-        st.error(f"❌ Error loading documents: {err}")
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("🔄 Retry"):
-                st.rerun()
-        with c2:
-            if st.button("🚪 Logout"):
-                logout()
+    
+    # Check Azure OpenAI availability
+    status.text("Checking Azure OpenAI connection...")
+    prog.progress(25)
+    
+    if not AZURE_OPENAI_AVAILABLE:
+        st.error("❌ Azure OpenAI library not available")
+        if st.button("🚪 Logout"):
+            logout()
         return
-    st.session_state.knowledge_base = docs
-    st.session_state.last_loaded_at = datetime.now().isoformat()
-    status.text(f"✅ Loaded {len(docs)} documents")
+    
+    # Get Azure client
+    status.text("Connecting to Azure OpenAI...")
+    prog.progress(50)
+    
+    client = get_azure_client()
+    if not client:
+        st.error("❌ Could not connect to Azure OpenAI. Check your credentials.")
+        if st.button("🚪 Logout"):
+            logout()
+        return
+    
+    # Get or create assistant
+    status.text("Setting up AI Assistant...")
+    prog.progress(75)
+    
+    assistant = get_or_create_assistant(client)
+    if not assistant:
+        if st.button("🚪 Logout"):
+            logout()
+        return
+    
+    # Success
+    status.text("✅ Assistant ready!")
     prog.progress(100)
-    st.session_state.loading_complete = True
-    time.sleep(0.4)
+    
+    st.session_state.assistant_ready = True
+    time.sleep(0.5)
     st.rerun()
 
 def show_main_app():
     st.title("🤖 MAGnus - MA Group Knowledge Bot")
     
-    # Add debug toggle
+    # Control buttons
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
         if st.button("🚪 Logout"):
@@ -263,60 +219,23 @@ def show_main_app():
             st.session_state.debug_mode = not st.session_state.debug_mode
             st.rerun()
     with col3:
-        if st.button("🔄 Smart Refresh"):
-            st.cache_data.clear()
-            st.session_state.knowledge_base = []
-            st.session_state.loading_complete = False
+        if st.button("🔄 Reset Chat"):
+            st.session_state.messages = []
+            st.session_state.conversation_state = "initial"
+            st.session_state.thread_id = None
             st.rerun()
 
-    kb = st.session_state.knowledge_base
-    docs_with_text = sum(1 for d in kb if d.get("_normalized_text"))
-    
-    # ALWAYS show debug info when debug mode is on
-    if st.session_state.debug_mode:
-        st.write("## 🔍 DEEP DEBUG ANALYSIS")
-        st.write(f"**Total documents loaded:** {len(kb)}")
-        st.write(f"**Documents with text content:** {docs_with_text}")
-        
-        if len(kb) == 0:
-            st.error("🚨 NO DOCUMENTS LOADED! Check Google Drive connection.")
-        elif docs_with_text == 0:
-            st.error("🚨 NO DOCUMENTS HAVE TEXT CONTENT! JSONL processing failed.")
-            st.write("**Raw document data:**")
-            for i, doc in enumerate(kb[:3]):
-                st.write(f"Document {i+1}:")
-                st.json(doc)
-        else:
-            st.write("**Sample documents with content:**")
-            for i, doc in enumerate(kb[:3]):
-                if doc.get("_normalized_text"):
-                    name = doc.get('name', 'Unknown')
-                    content = doc.get('_normalized_text', '')
-                    st.write(f"**{name}**")
-                    st.write(f"- Content length: {len(content)} chars")
-                    st.write(f"- Content preview: {content[:300]}...")
-                    st.write("---")
-    
-    # Enhanced sidebar with debug info
-    st.sidebar.header("📚 Knowledge Base")
-    st.sidebar.write(f"Loaded documents: {len(kb)}")
-    st.sidebar.write(f"Docs with text content: {docs_with_text}")
+    # Sidebar with system info
+    st.sidebar.header("🤖 AI Assistant")
+    st.sidebar.write("Status: ✅ Ready")
+    st.sidebar.write("Source: Azure AI Foundry")
+    st.sidebar.write("Search: File Search Enabled")
     
     if st.session_state.debug_mode:
         st.sidebar.header("🔍 Debug Info")
-        st.sidebar.write("**Document Types:**")
-        types = {}
-        for doc in kb:
-            doc_type = doc.get('type', 'unknown')
-            types[doc_type] = types.get(doc_type, 0) + 1
-        for doc_type, count in types.items():
-            st.sidebar.write(f"- {doc_type}: {count}")
-        
-        st.sidebar.write("**Document Names:**")
-        for doc in kb[:10]:  # Show first 10
-            name = doc.get('name', 'Unknown')[:30] + "..."
-            content_len = len(doc.get('_normalized_text', ''))
-            st.sidebar.write(f"- {name} ({content_len} chars)")
+        st.sidebar.write(f"Thread ID: {st.session_state.thread_id}")
+        st.sidebar.write(f"Messages: {len(st.session_state.messages)}")
+        st.sidebar.write(f"State: {st.session_state.conversation_state}")
 
     # Initial welcome
     if not st.session_state.messages and st.session_state.conversation_state == "initial":
@@ -349,6 +268,7 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
         st.markdown(user_input)
 
     state = st.session_state.conversation_state
+    
     if state == "initial":
         with st.chat_message("assistant"):
             st.markdown(st.session_state.messages[0]["content"])
@@ -394,143 +314,83 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
                 st.session_state.messages.append({"role": "assistant", "content": msg})
         return
 
-    # Question / Issue / Problem handling
+    # Question / Issue / Problem handling with Azure Assistant
     if state in ["waiting_for_issue", "waiting_for_problem", "categorized"]:
         if not AZURE_OPENAI_AVAILABLE:
             with st.chat_message("assistant"):
                 st.error("AI service is not available.")
             return
 
-        kb = st.session_state.knowledge_base
-        
-        # STOP HERE if no documents with content
-        if docs_with_text == 0:
+        client = get_azure_client()
+        if not client:
             with st.chat_message("assistant"):
-                st.error("🚨 No documents with content found! Cannot search knowledge base.")
-                st.markdown("**Troubleshooting steps:**")
-                st.markdown("1. Check that JSONL files are in the correct Google Drive folder")
-                st.markdown("2. Verify JSONL files have proper format")
-                st.markdown("3. Click 'Smart Refresh' to reload documents")
-                return
-        
-        tokens, bigrams = tokenize_query(user_input)
-        
-        if st.session_state.debug_mode:
-            st.write(f"🔍 **Query Analysis:**")
-            st.write(f"- Original query: '{user_input}'")
-            st.write(f"- Tokens (3+ chars): {tokens}")
-            st.write(f"- Bigrams: {bigrams}")
-            st.write("---")
-        
-        # Rank documents by query relevance
-        scored = []
-        for d in kb:
-            score = score_doc(d, tokens, bigrams)
-            scored.append((score, d))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        
-        # Keep top N docs, but also drop zeros if we have at least one positive
-        positives = [d for s, d in scored if s > 0]
-        selected = positives[:8] if positives else [d for s,d in scored[:6]]
+                st.error("Could not connect to Azure OpenAI service.")
+            return
 
-        # Show matched docs & scores in sidebar
-        st.sidebar.write("Matched docs:")
-        for s, d in scored[:8]:
-            name = d.get("name") or d.get("title") or "(untitled)"
-            st.sidebar.write(f"- {name} (score {s})")
-
-        # Build context with targeted snippets around the hits
-        context_cap = 32000  # character cap
-        used = 0
-        chunks = []
-        for d in selected:
-            name = d.get("name") or d.get("title") or "(untitled)"
-            text = d.get("_normalized_text") or ""
-            snippet = extract_snippet(text, tokens, bigrams, max_len=8000, window=1600)
-            if not snippet:
-                continue
-            block = f"Document: {name}\n{snippet}"
-            if used + len(block) > context_cap:
-                break
-            chunks.append(block)
-            used += len(block)
-        knowledge_context = "\n\n".join(chunks)
-        
-        if st.session_state.debug_mode:
-            st.write(f"🔍 **Context Building:**")
-            st.write(f"- Built context with {len(chunks)} document chunks")
-            st.write(f"- Total context length: {len(knowledge_context)} characters")
-            if knowledge_context:
-                st.write(f"- Context preview: {knowledge_context[:500]}...")
-                st.write("✅ CONTEXT SUCCESSFULLY BUILT")
-            else:
-                st.write("🚨 NO CONTEXT BUILT - This means no relevant content was found!")
-
-        # STOP if no context
-        if not knowledge_context:
+        assistant = get_or_create_assistant(client)
+        if not assistant:
             with st.chat_message("assistant"):
-                st.markdown("I cannot find information relevant to your query in our company documents. This could mean:")
-                st.markdown("- The information isn't in the loaded documents")
-                st.markdown("- The search terms don't match the document content")
-                st.markdown("- The documents weren't processed correctly")
-                st.markdown("\nPlease contact your manager or HR for assistance with this question.")
-                return
+                st.error("AI Assistant is not properly configured.")
+            return
 
-        system_message = {
-            "role": "system",
-            "content": f"""You are a company knowledge base assistant. You ONLY provide information that can be found in the company documents provided to you.
-
-COMPANY KNOWLEDGE BASE:
-{knowledge_context}
-
-IMPORTANT RESTRICTIONS:
-1. ONLY answer questions using information directly found in the company documents above
-2. If the answer is not in the company documents, respond with: "I cannot find that information in our company documents. Please contact your manager or HR for assistance with this question."
-3. Do NOT provide general advice, external information, or assumptions
-4. Do NOT make up information or provide answers based on general knowledge
-5. Always cite which specific document contains the information you're referencing (by the 'Document:' label)
-6. If a question is partially covered in the documents, only answer the parts that are documented
-7. The documents are organized by priority - higher priority documents contain more essential information
-
-Your role is to be a reliable source of company-specific information only."""
-        }
-
-        messages_for_api = [system_message] + st.session_state.messages
+        # Convert messages to OpenAI format for the assistant
+        assistant_messages = []
+        for msg in st.session_state.messages:
+            if msg["role"] in ["user", "assistant"]:
+                assistant_messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
 
         with st.chat_message("assistant"):
             with st.spinner("🤔 Searching through company documents..."):
-                placeholder = st.empty()
-                full = ""
-                stream, err = call_openai_api(messages_for_api)
-            if err:
-                st.error(f"AI Error: {err}")
-                placeholder.markdown(f"AI Error: {err}")
-            elif stream:
-                try:
-                    for chunk in stream:
-                        if not hasattr(chunk, "choices") or not chunk.choices:
-                            continue
-                        delta_obj = getattr(chunk.choices[0], "delta", None)
-                        if not delta_obj:
-                            continue
-                        delta = getattr(delta_obj, "content", None)
-                        if delta:
-                            full += delta
-                            placeholder.markdown(full + "▌")
-                    placeholder.markdown(full)
-                    st.session_state.messages.append({"role": "assistant", "content": full})
-                except Exception as e:
-                    st.error(f"Streaming Error: {e}")
-                    placeholder.markdown(f"Streaming Error: {e}")
+                # Create thread and run
+                thread_id, run_id = create_thread_and_run(
+                    client, 
+                    assistant.id, 
+                    assistant_messages
+                )
+                
+                if not thread_id or not run_id:
+                    st.error("Failed to start AI Assistant.")
+                    return
+                
+                # Store thread ID for potential follow-ups
+                st.session_state.thread_id = thread_id
+                
+                if st.session_state.debug_mode:
+                    st.write(f"🔍 Thread ID: {thread_id}")
+                    st.write(f"🔍 Run ID: {run_id}")
+                
+                # Wait for completion
+                success, run_result = wait_for_run_completion(client, thread_id, run_id)
+                
+                if not success:
+                    if run_result:
+                        st.error(f"Assistant run failed: {run_result.status}")
+                        if st.session_state.debug_mode and hasattr(run_result, 'last_error'):
+                            st.write(f"Error details: {run_result.last_error}")
+                    else:
+                        st.error("Assistant run timed out or failed.")
+                    return
+                
+                # Get the response
+                response = get_assistant_response(client, thread_id)
+                
+                if response:
+                    st.markdown(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                else:
+                    st.error("Could not retrieve assistant response.")
 
     # Footer
     st.markdown("---")
-    st.caption(f"MAGnus Knowledge Bot • Docs: {len(kb)} • With text: {docs_with_text} • Last loaded: {st.session_state.last_loaded_at or 'Unknown'}")
+    st.caption(f"MAGnus Knowledge Bot • Powered by Azure AI Foundry • Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
-# Router
+# ---------- Router ----------
 if not st.session_state.authenticated:
     show_login()
-elif not st.session_state.loading_complete:
-    show_loading()
+elif not st.session_state.assistant_ready:
+    show_assistant_setup()
 else:
     show_main_app()
