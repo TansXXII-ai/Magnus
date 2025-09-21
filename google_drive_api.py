@@ -74,20 +74,43 @@ class GoogleDriveAPI:
             st.error(f"Error finding folder: {str(e)}")
             return None
     
-    def list_files_in_folder(self, folder_id):
-        """List all files in a specific folder"""
+    def list_all_files_recursively(self, folder_id):
+        """Recursively list all files in a folder and its subfolders"""
+        all_files = []
+        
         try:
+            # Get files and folders in current directory
             query = f"'{folder_id}' in parents and trashed=false"
             results = self.service.files().list(
                 q=query,
-                fields="files(id, name, mimeType, modifiedTime, size, webViewLink)",
-                pageSize=100
+                fields="files(id, name, mimeType, modifiedTime, size, webViewLink, parents)",
+                pageSize=1000
             ).execute()
             
-            return results.get('files', [])
+            items = results.get('files', [])
+            
+            for item in items:
+                if item['mimeType'] == 'application/vnd.google-apps.folder':
+                    # It's a folder - recursively get files from it
+                    subfolder_files = self.list_all_files_recursively(item['id'])
+                    # Add folder path to file names for clarity
+                    for file_item in subfolder_files:
+                        file_item['folder_path'] = f"{item['name']}/{file_item.get('folder_path', '')}"
+                    all_files.extend(subfolder_files)
+                else:
+                    # It's a file - add it to our list
+                    item['folder_path'] = ""  # Root level file
+                    all_files.append(item)
+            
+            return all_files
+            
         except Exception as e:
-            st.error(f"Error listing files: {str(e)}")
+            st.error(f"Error listing files recursively: {str(e)}")
             return []
+    
+    def list_files_in_folder(self, folder_id):
+        """List all files in a specific folder (now includes subfolders)"""
+        return self.list_all_files_recursively(folder_id)
     
     def download_file_content(self, file_id, mime_type):
         """Download file content as bytes"""
@@ -199,7 +222,7 @@ class GoogleDriveConnector:
         return self.api.test_connection()
     
     def get_documents(self):
-        """Get documents from Google Drive folder - compatible with existing Dropbox format"""
+        """Get documents from Google Drive folder - now includes subfolders"""
         if not self.api.service:
             return []
         
@@ -209,7 +232,7 @@ class GoogleDriveConnector:
             if not folder_id:
                 raise Exception(f"Folder '{self.folder_name}' not found or not shared with service account")
             
-            # Get files in the folder
+            # Get files in the folder (now includes subfolders)
             files = self.api.list_files_in_folder(folder_id)
             
             documents = []
@@ -226,6 +249,7 @@ class GoogleDriveConnector:
             for file_data in files:
                 file_name = file_data['name']
                 mime_type = file_data['mimeType']
+                folder_path = file_data.get('folder_path', '')
                 
                 # Only process supported file types
                 if mime_type in supported_types:
@@ -242,15 +266,21 @@ class GoogleDriveConnector:
                         else:
                             file_extension = file_name.split('.')[-1] if '.' in file_name else 'unknown'
                         
+                        # Create display name with folder path if in subfolder
+                        display_name = file_name
+                        if folder_path:
+                            display_name = f"{folder_path.rstrip('/')}/{file_name}"
+                        
                         documents.append({
-                            'name': file_name,
+                            'name': display_name,  # Include folder path in name
                             'content': content_text,
                             'source': 'google_drive',
                             'modified': file_data.get('modifiedTime', ''),
                             'size': file_data.get('size', 0),
                             'path': file_data.get('webViewLink', ''),
                             'type': file_extension,
-                            'mime_type': mime_type
+                            'mime_type': mime_type,
+                            'folder_path': folder_path
                         })
             
             return documents
