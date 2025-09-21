@@ -1,0 +1,134 @@
+/* Import Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Main color scheme */
+:root {
+    --primary-color: #779eb8;
+    --secondary-color: #272557;
+    --background-light: #f8fafc;
+    --text-dark: #1e293b;
+    --border-color: #e2e8f0;
+    --success-color: #10b981;
+    --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Hide Streamlit elements */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+
+/* Main app styling */
+.stApp {
+    background: linear-gradient(135deg, var(--background-light) 0%, #ffffff 100%);
+    font-family: 'Inter', sans-serif;
+}
+
+/* Custom button styling */
+.stButton > button {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 0.75rem 1.5rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    box-shadow: var(--shadow);
+    font-family: 'Inter', sans-serif;
+}
+
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px -8px rgba(119, 158, 184, 0.4);
+}
+
+/* Chat message styling */
+.stChatMessage {
+    background: white;
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    margin: 0.5rem 0;
+    border: 1px solid var(--border-color);
+}
+
+/* Logo container */
+.logo-container {
+    display: flex;
+    justify-content: center;
+    margin: 2rem 0;
+}
+
+.logo-container img {
+    max-height: 80px;
+    width: auto;
+}
+
+/* Login form styling */
+.login-container {
+    max-width: 400px;
+    margin: 0 auto;
+    padding: 2rem;
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 10px 40px -10px rgba(39, 37, 87, 0.2);
+    border: 1px solid var(--border-color);
+}
+
+/* Title styling */
+.main-title {
+    color: var(--secondary-color);
+    text-align: center;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    font-family: 'Inter', sans-serif;
+}
+
+/* Sidebar styling */
+.css-1d391kg {
+    background: var(--secondary-color);
+}
+
+/* Input styling */
+.stTextInput > div > div > input {
+    border-radius: 12px;
+    border: 2px solid var(--border-color);
+    transition: all 0.3s ease;
+}
+
+.stTextInput > div > div > input:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(119, 158, 184, 0.1);
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .stButton > button {
+        width: 100%;
+        margin: 0.25rem 0;
+    }
+    
+    .login-container {
+        margin: 1rem;
+        padding: 1.5rem;
+    }
+    
+    .logo-container img {
+        max-height: 60px;
+    }
+}
+
+/* Typing indicator */
+.typing-indicator {
+    display: inline-block;
+    margin-left: 5px;
+}
+
+.typing-indicator::after {
+    content: '|';
+    animation: blink 1s infinite;
+    color: var(--primary-color);
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
