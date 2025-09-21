@@ -3,7 +3,52 @@ import time
 import streamlit as st
 from datetime import datetime
 
-st.set_page_config(page_title="MAGnus - MA Group Knowledge Bot", page_icon="🤖", layout="wide")
+st.set_page_config(
+    page_title="MAGnus - MA Group Knowledge Bot", 
+    page_icon="🤖", 
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+def load_css():
+    """Load external CSS file"""
+    try:
+        with open('styles.css') as f:
+            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+    except FileNotFoundError:
+        st.error("CSS file not found. Please ensure 'styles.css' is in the same directory as your app.")
+
+# Load CSS
+load_css()
+
+def display_logo():
+    """Display the MAGnus logo"""
+    try:
+        # Try to load logo from various sources
+        logo_url = "https://raw.githubusercontent.com/yourusername/yourrepo/main/magnuslogo.png"  # Update with your GitHub path
+        st.markdown(f"""
+        <div class="logo-container">
+            <img src="{logo_url}" alt="MAGnus Logo">
+        </div>
+        """, unsafe_allow_html=True)
+    except:
+        # Fallback if logo can't be loaded
+        st.markdown("""
+        <div class="logo-container">
+            <h1 style="color: var(--secondary-color); font-family: 'Inter', sans-serif; font-weight: 700;">MAGnus</h1>
+        </div>
+        """, unsafe_allow_html=True)
+
+def typing_effect(text, placeholder):
+    """Display text with typing effect"""
+    displayed_text = ""
+    for char in text:
+        displayed_text += char
+        placeholder.markdown(displayed_text + '<span class="typing-indicator"></span>', unsafe_allow_html=True)
+        time.sleep(0.02)  # Adjust speed here - 0.02 is quite fast
+    
+    # Final display without cursor
+    placeholder.markdown(displayed_text)
 
 # ---------- Dependencies ----------
 try:
@@ -161,11 +206,19 @@ def logout():
 
 # ---------- Screens ----------
 def show_login():
-    st.title("🔐 MAGnus Knowledge Bot - Login")
+    st.markdown('<h1 class="main-title">🔐 MAGnus Knowledge Bot</h1>', unsafe_allow_html=True)
+    
+    display_logo()
+    
+    st.markdown('<div class="login-container">', unsafe_allow_html=True)
+    
     with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+        st.markdown("### Welcome Back!")
+        username = st.text_input("Username", placeholder="Enter your username")
+        password = st.text_input("Password", type="password", placeholder="Enter your password")
         login_button = st.form_submit_button("🚀 Login & Connect", use_container_width=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
     
     if login_button:
         if username == "MAG" and st.secrets.get("LOGIN_PASSWORD", "defaultpassword") == password:
@@ -222,18 +275,16 @@ def show_assistant_setup():
     st.rerun()
 
 def show_main_app():
-    st.title("🤖 MAGnus - MA Group Knowledge Bot")
+    st.markdown('<h1 class="main-title">🤖 MAGnus - MA Group Knowledge Bot</h1>', unsafe_allow_html=True)
     
-    # Control buttons
-    col1, col2, col3 = st.columns([1, 1, 1])
+    display_logo()
+    
+    # Control buttons (removed debug toggle)
+    col1, col2 = st.columns([1, 1])
     with col1:
         if st.button("🚪 Logout"):
             logout()
     with col2:
-        if st.button("🔍 Toggle Debug"):
-            st.session_state.debug_mode = not st.session_state.debug_mode
-            st.rerun()
-    with col3:
         if st.button("🔄 Reset Chat"):
             st.session_state.messages = []
             st.session_state.conversation_state = "initial"
@@ -241,16 +292,15 @@ def show_main_app():
             st.rerun()
 
     # Sidebar with system info
-    st.sidebar.header("🤖 AI Assistant")
-    st.sidebar.write("Status: ✅ Ready")
-    st.sidebar.write("Source: Azure AI Foundry")
-    st.sidebar.write("Search: File Search Enabled")
-    
-    if st.session_state.debug_mode:
-        st.sidebar.header("🔍 Debug Info")
-        st.sidebar.write(f"Thread ID: {st.session_state.thread_id}")
-        st.sidebar.write(f"Messages: {len(st.session_state.messages)}")
-        st.sidebar.write(f"State: {st.session_state.conversation_state}")
+    with st.sidebar:
+        st.markdown("### 🤖 AI Assistant")
+        st.write("**Status:** ✅ Ready")
+        st.write("**Source:** Azure AI Foundry")
+        st.write("**Search:** File Search Enabled")
+        
+        st.markdown("---")
+        st.markdown("### 📱 Contact")
+        st.write("For technical support or questions about MAGnus, contact your IT team.")
 
     # Initial welcome with time-based greeting
     if not st.session_state.messages and st.session_state.conversation_state == "initial":
@@ -413,7 +463,9 @@ I'm MAGnus, your friendly AI assistant here to help with anything work-related. 
                 response = get_assistant_response(client, thread_id)
                 
                 if response:
-                    st.markdown(response)
+                    # Use typing effect for the response
+                    response_placeholder = st.empty()
+                    typing_effect(response, response_placeholder)
                     st.session_state.messages.append({"role": "assistant", "content": response})
                 else:
                     st.error("Could not retrieve assistant response.")
