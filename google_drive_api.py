@@ -112,6 +112,39 @@ class GoogleDriveAPI:
         """List all files in a specific folder (now includes subfolders)"""
         return self.list_all_files_recursively(folder_id)
     
+    def is_supported_file(self, file_name, mime_type):
+        """Check if a file is supported based on name and MIME type"""
+        # Define supported MIME types
+        supported_mime_types = [
+            'text/plain',
+            'text/csv', 
+            'text/markdown',
+            'application/pdf',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.google-apps.document',
+            'application/vnd.google-apps.spreadsheet',
+            'application/json',
+            'application/x-jsonlines',  # Sometimes used for JSONL
+            'text/x-json'  # Alternative JSON MIME type
+        ]
+        
+        # Define supported file extensions
+        supported_extensions = [
+            '.txt', '.md', '.csv', '.pdf', '.docx', '.json', '.jsonl'
+        ]
+        
+        # Check MIME type
+        if mime_type in supported_mime_types:
+            return True
+            
+        # Check file extension for files that might have generic MIME types
+        file_lower = file_name.lower()
+        for ext in supported_extensions:
+            if file_lower.endswith(ext):
+                return True
+                
+        return False
+    
     def download_file_content(self, file_id, mime_type):
         """Download file content as bytes"""
         try:
@@ -157,6 +190,14 @@ class GoogleDriveAPI:
             return None
         
         try:
+            # Check for JSONL files first (by extension)
+            if file_name.lower().endswith('.jsonl'):
+                return self.process_jsonl_content(content, file_name)
+            
+            # Then check by MIME type and other extensions
+            if mime_type in ['application/json', 'application/x-jsonlines', 'text/x-json'] or file_name.lower().endswith('.json'):
+                return self.process_jsonl_content(content, file_name)
+            
             # Handle different file types
             if mime_type in ['text/plain', 'text/csv', 'text/markdown']:
                 return content.decode('utf-8')
@@ -188,28 +229,6 @@ class GoogleDriveAPI:
                     return "Cannot process PDF files. Missing pypdf library."
                 except Exception as e:
                     return f"Error processing PDF: {str(e)}"
-            
-            
-            elif file_name.lower().endswith('.jsonl') or mime_type == 'application/json':
-                # Handle JSONL knowledge base files: one JSON object per line
-                try:
-                    text_accum = []
-                    for line in content.decode('utf-8', errors='ignore').splitlines():
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            obj = json.loads(line)
-                            # Prefer KB fields; fall back to generic content
-                            snippet = obj.get('body_md') or obj.get('content') or obj.get('text') or ''
-                            if snippet:
-                                text_accum.append(snippet)
-                        except Exception:
-                            # tolerate non-JSON lines
-                            continue
-                    return "\n\n".join(text_accum).strip() if text_accum else ""
-                except Exception as e:
-                    return f"Error processing JSONL: {str(e)}"
 
             elif mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
                 # Handle DOCX files
@@ -233,6 +252,57 @@ class GoogleDriveAPI:
                 
         except Exception as e:
             return f"Error processing file {file_name}: {str(e)}"
+
+    def process_jsonl_content(self, content, file_name):
+        """Process JSONL content specifically"""
+        try:
+            text_accum = []
+            content_str = content.decode('utf-8', errors='ignore')
+            
+            # Debug: Log the first few lines
+            lines = content_str.splitlines()
+            st.write(f"🔍 Processing JSONL file: {file_name}")
+            st.write(f"📊 Total lines: {len(lines)}")
+            
+            processed_objects = 0
+            for line_num, line in enumerate(lines, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    processed_objects += 1
+                    
+                    # Prefer KB fields; fall back to generic content
+                    snippet = (obj.get('body_md') or 
+                              obj.get('content') or 
+                              obj.get('text') or 
+                              obj.get('body') or
+                              obj.get('description') or
+                              '')
+                    
+                    if snippet:
+                        text_accum.append(snippet)
+                        
+                except json.JSONDecodeError as e:
+                    st.warning(f"⚠️ Line {line_num} in {file_name} is not valid JSON: {str(e)}")
+                    # Try to use the line as plain text if it's not empty
+                    if line.strip():
+                        text_accum.append(line)
+                except Exception as e:
+                    st.warning(f"⚠️ Error processing line {line_num} in {file_name}: {str(e)}")
+                    continue
+            
+            result = "\n\n".join(text_accum).strip() if text_accum else ""
+            st.success(f"✅ Successfully processed {processed_objects} JSON objects from {file_name}")
+            st.write(f"📝 Extracted {len(result)} characters of content")
+            
+            return result
+            
+        except Exception as e:
+            error_msg = f"Error processing JSONL file {file_name}: {str(e)}"
+            st.error(error_msg)
+            return error_msg
 
 class GoogleDriveConnector:
     def __init__(self):
@@ -258,24 +328,20 @@ class GoogleDriveConnector:
             files = self.api.list_files_in_folder(folder_id)
             
             documents = []
-            supported_types = [
-                'text/plain',
-                'text/csv', 
-                'text/markdown',
-                'application/pdf',
-                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                'application/vnd.google-apps.document',
-                'application/vnd.google-apps.spreadsheet',
-                'application/json'
-            ]
+            
+            st.write(f"🔍 Found {len(files)} total files in Google Drive")
             
             for file_data in files:
                 file_name = file_data['name']
                 mime_type = file_data['mimeType']
                 folder_path = file_data.get('folder_path', '')
                 
-                # Only process supported file types
-                if mime_type in supported_types:
+                st.write(f"📄 Checking file: {file_name} (MIME: {mime_type})")
+                
+                # Use the new is_supported_file method
+                if self.api.is_supported_file(file_name, mime_type):
+                    st.write(f"✅ Processing supported file: {file_name}")
+                    
                     # Download and process file content
                     content_bytes = self.api.download_file_content(file_data['id'], mime_type)
                     content_text = self.api.process_file_content(content_bytes, file_name, mime_type)
@@ -286,6 +352,8 @@ class GoogleDriveConnector:
                             file_extension = 'gdoc'
                         elif mime_type == 'application/vnd.google-apps.spreadsheet':
                             file_extension = 'gsheet'
+                        elif file_name.lower().endswith('.jsonl'):
+                            file_extension = 'jsonl'
                         else:
                             file_extension = file_name.split('.')[-1] if '.' in file_name else 'unknown'
                         
@@ -305,7 +373,14 @@ class GoogleDriveConnector:
                             'mime_type': mime_type,
                             'folder_path': folder_path
                         })
+                        
+                        st.success(f"✅ Added document: {display_name}")
+                    else:
+                        st.warning(f"⚠️ Could not extract content from: {file_name}")
+                else:
+                    st.info(f"ℹ️ Skipping unsupported file: {file_name} (MIME: {mime_type})")
             
+            st.success(f"🎉 Successfully loaded {len(documents)} documents")
             return documents
             
         except Exception as e:
