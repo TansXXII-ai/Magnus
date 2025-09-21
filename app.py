@@ -24,6 +24,13 @@ try:
 except ImportError:
     DROPBOX_AVAILABLE = False
 
+# Import Google Drive
+try:
+    from google_drive_api import GoogleDriveConnector
+    GOOGLE_DRIVE_AVAILABLE = True
+except ImportError:
+    GOOGLE_DRIVE_AVAILABLE = False
+
 # Import document processing libraries
 PDF_AVAILABLE = False
 DOCX_AVAILABLE = False
@@ -44,7 +51,7 @@ try:
 except ImportError:
     pass
 
-# Dropbox API functions
+# Dropbox API functions (keeping existing functionality)
 class DropboxConnector:
     def __init__(self):
         self.access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
@@ -186,27 +193,42 @@ class EnhancedDropboxConnector(DropboxConnector):
 def get_dropbox_connector():
     return EnhancedDropboxConnector()
 
-# Load documents from Dropbox
+# Initialize Google Drive connector
+@st.cache_resource
+def get_google_drive_connector():
+    if GOOGLE_DRIVE_AVAILABLE:
+        return GoogleDriveConnector()
+    return None
+
+# Load documents from multiple sources
 @st.cache_data(ttl=1800)  # Cache for 30 minutes
 def load_knowledge_base():
-    """Load documents from Dropbox with optimized caching"""
-    connector = get_dropbox_connector()
+    """Load documents from configured sources (Dropbox, Google Drive)"""
+    documents = []
     
-    # Check if credentials are configured
-    access_token = os.getenv("DROPBOX_ACCESS_TOKEN")
+    # Try Dropbox first (existing functionality)
+    dropbox_token = os.getenv("DROPBOX_ACCESS_TOKEN")
+    if dropbox_token and DROPBOX_AVAILABLE:
+        try:
+            connector = get_dropbox_connector()
+            dropbox_docs = connector.get_documents()
+            documents.extend(dropbox_docs)
+        except Exception as e:
+            st.warning(f"Dropbox error: {str(e)}")
     
-    if not access_token:
-        return []
+    # Try Google Drive if configured
+    if GOOGLE_DRIVE_AVAILABLE:
+        try:
+            # Check if Google Drive credentials are configured
+            if "google" in st.secrets or "google_service_account" in st.secrets:
+                google_connector = get_google_drive_connector()
+                if google_connector:
+                    google_docs = google_connector.get_documents()
+                    documents.extend(google_docs)
+        except Exception as e:
+            st.warning(f"Google Drive error: {str(e)}")
     
-    if not DROPBOX_AVAILABLE:
-        raise Exception("Dropbox library not available. Check requirements.txt")
-    
-    try:
-        documents = connector.get_documents()
-        return documents
-    except Exception as e:
-        # Return cached data if available, otherwise show warning
-        raise Exception(f"Using cached documents due to error: {str(e)}")
+    return documents
 
 def call_openai_api(messages):
     """Call Azure OpenAI API"""
@@ -258,7 +280,7 @@ if "current_category" not in st.session_state:
 if "dropbox_authenticated" not in st.session_state:
     st.session_state.dropbox_authenticated = False
 
-# Enhanced login function with automatic Dropbox authentication
+# Enhanced login function with Google Drive integration
 def show_login():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -272,19 +294,53 @@ def show_login():
     st.markdown("""
     **Welcome to MAGnus Knowledge Bot**
     
-    Please log in to access the company knowledge base. Your Dropbox will be connected automatically.
+    Please log in to access the company knowledge base. Your document sources will be connected automatically.
     """)
     
-    # Check if we have a persistent token and show status
+    # Check storage connections
+    storage_status = []
+    
+    # Check Dropbox
     connector = get_dropbox_connector()
     has_persistent_token = 'persistent_dropbox_token' in st.session_state
     
     if has_persistent_token:
         connected, message = connector.test_connection()
         if connected:
-            st.success(f"✅ Dropbox already connected: {message}")
+            storage_status.append(f"✅ Dropbox: {message}")
         else:
-            st.warning(f"⚠️ Stored Dropbox token expired, will reconnect automatically")
+            storage_status.append(f"⚠️ Dropbox token expired")
+    elif os.getenv("DROPBOX_ACCESS_TOKEN"):
+        storage_status.append("🔄 Dropbox configured (will connect on login)")
+    else:
+        storage_status.append("ℹ️ Dropbox not configured")
+    
+    # Check Google Drive
+    if GOOGLE_DRIVE_AVAILABLE:
+        try:
+            if "google" in st.secrets or "google_service_account" in st.secrets:
+                google_connector = get_google_drive_connector()
+                if google_connector:
+                    connected, message = google_connector.test_connection()
+                    if connected:
+                        storage_status.append(f"✅ Google Drive: {message}")
+                    else:
+                        storage_status.append(f"❌ Google Drive: {message}")
+                else:
+                    storage_status.append("❌ Google Drive: Failed to initialize")
+            else:
+                storage_status.append("ℹ️ Google Drive not configured")
+        except Exception as e:
+            storage_status.append(f"❌ Google Drive error: {str(e)}")
+    else:
+        storage_status.append("ℹ️ Google Drive not available")
+    
+    # Display storage status
+    if storage_status:
+        st.markdown("### 📁 Document Storage Status")
+        for status in storage_status:
+            st.markdown(status)
+        st.markdown("---")
     
     with st.form("login_form"):
         col1, col2, col3 = st.columns([1, 2, 1])
@@ -303,14 +359,12 @@ def show_login():
                 st.session_state.loading_complete = False
                 
                 # Automatic Dropbox connection
-                with st.spinner("🔗 Connecting to Dropbox..."):
+                with st.spinner("🔗 Connecting to document sources..."):
                     # First try persistent token
                     if has_persistent_token:
                         connected, message = connector.test_connection()
                         if connected:
                             st.session_state.dropbox_authenticated = True
-                            st.success("✅ Login successful! Using existing Dropbox connection...")
-                            st.rerun()
                         else:
                             # Clear expired token
                             if 'persistent_dropbox_token' in st.session_state:
@@ -323,12 +377,9 @@ def show_login():
                         connected, message = connector.test_connection()
                         if connected:
                             st.session_state.dropbox_authenticated = True
-                            st.success(f"✅ Login successful! Connected to Dropbox: {message}")
-                            st.rerun()
-                        else:
-                            st.error(f"❌ Dropbox connection failed: {message}")
-                    else:
-                        st.error("❌ Dropbox access token not configured in environment")
+                    
+                    st.success("✅ Login successful! Document sources connected...")
+                    st.rerun()
             else:
                 st.error("Invalid username or password. Please try again.")
     
@@ -343,7 +394,7 @@ def show_login():
                 st.success("Stored Dropbox connection cleared")
                 st.rerun()
 
-# Enhanced loading function with better feedback
+# Enhanced loading function with multi-source support
 def show_loading():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -359,44 +410,64 @@ def show_loading():
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    status_text.text("Initializing Dropbox connection...")
+    status_text.text("Initializing document sources...")
     progress_bar.progress(10)
     
-    connector = get_dropbox_connector()
+    # Check and connect to available sources
+    sources_connected = []
     
-    # Check authentication status
-    if not st.session_state.get('dropbox_authenticated', False):
-        st.error("❌ Dropbox not authenticated. Please login again.")
-        if st.button("🔙 Back to Login"):
-            logout()
-        return
-    
-    status_text.text("Verifying Dropbox connection...")
+    # Check Dropbox
+    status_text.text("Checking Dropbox connection...")
     progress_bar.progress(30)
     
-    # Test connection
-    connected, message = connector.test_connection()
-    if not connected:
-        st.error(f"❌ Dropbox connection failed: {message}")
+    if DROPBOX_AVAILABLE and os.getenv("DROPBOX_ACCESS_TOKEN"):
+        try:
+            connector = get_dropbox_connector()
+            connected, message = connector.test_connection()
+            if connected:
+                sources_connected.append(f"Dropbox: {message}")
+            else:
+                st.warning(f"Dropbox: {message}")
+        except Exception as e:
+            st.warning(f"Dropbox error: {str(e)}")
+    
+    # Check Google Drive
+    status_text.text("Checking Google Drive connection...")
+    progress_bar.progress(50)
+    
+    if GOOGLE_DRIVE_AVAILABLE:
+        try:
+            if "google" in st.secrets or "google_service_account" in st.secrets:
+                google_connector = get_google_drive_connector()
+                if google_connector:
+                    connected, message = google_connector.test_connection()
+                    if connected:
+                        sources_connected.append(f"Google Drive: {message}")
+                    else:
+                        st.warning(f"Google Drive: {message}")
+        except Exception as e:
+            st.warning(f"Google Drive error: {str(e)}")
+    
+    if not sources_connected:
+        st.error("❌ No document sources available. Please check configuration.")
         if st.button("🔙 Back to Login"):
             logout()
         return
     
-    st.info(f"📱 {message}")
+    # Display connected sources
+    for source in sources_connected:
+        st.info(f"📱 {source}")
     
     status_text.text("Fetching document list...")
-    progress_bar.progress(50)
+    progress_bar.progress(70)
     
     try:
-        documents = connector.get_documents()
+        documents = load_knowledge_base()
         
         status_text.text("Processing documents...")
-        progress_bar.progress(70)
+        progress_bar.progress(90)
         
         st.session_state.knowledge_base = documents
-        
-        progress_bar.progress(90)
-        status_text.text("Finalizing setup...")
         
         progress_bar.progress(100)
         status_text.text(f"✅ Loaded {len(documents)} documents successfully!")
@@ -410,7 +481,7 @@ def show_loading():
         
     except Exception as e:
         st.error(f"❌ Error loading documents: {str(e)}")
-        st.info("Please check your Dropbox configuration and try again.")
+        st.info("Please check your document source configurations and try again.")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -471,41 +542,74 @@ def show_main_app():
         else:
             st.error("❌ Azure OpenAI Unavailable")
         
+        # Document source status
+        st.subheader("📁 Document Sources")
+        
         # Dropbox status
         dropbox_token = os.getenv("DROPBOX_ACCESS_TOKEN")
-        
         if dropbox_token and DROPBOX_AVAILABLE:
-            st.success("✅ Dropbox Connected")
+            st.success("✅ Dropbox Available")
         elif not dropbox_token:
-            st.error("❌ Dropbox Token Missing")
+            st.info("ℹ️ Dropbox Not Configured")
         elif not DROPBOX_AVAILABLE:
             st.error("❌ Dropbox Library Missing")
         
-        st.info("📄 **Automatic Dropbox Integration**")
+        # Google Drive status
+        if GOOGLE_DRIVE_AVAILABLE:
+            try:
+                if "google" in st.secrets or "google_service_account" in st.secrets:
+                    connector = get_google_drive_connector()
+                    if connector:
+                        connected, message = connector.test_connection()
+                        if connected:
+                            st.success("✅ Google Drive Connected")
+                            st.caption(f"📁 {message}")
+                        else:
+                            st.error("❌ Google Drive Connection Failed")
+                            st.caption(f"Error: {message}")
+                    else:
+                        st.error("❌ Google Drive Failed to Initialize")
+                else:
+                    st.info("ℹ️ Google Drive Available (configure credentials)")
+            except Exception as e:
+                st.error(f"❌ Google Drive Error: {str(e)}")
+        else:
+            st.info("ℹ️ Google Drive Available (install dependencies)")
         
         st.divider()
         
         st.header("📚 Knowledge Base")
         
         if knowledge_base:
-            st.success(f"✅ {len(knowledge_base)} Dropbox documents loaded")
+            # Show breakdown by source
+            dropbox_docs = [doc for doc in knowledge_base if doc.get('source') == 'dropbox']
+            google_docs = [doc for doc in knowledge_base if doc.get('source') == 'google_drive']
+            
+            total_docs = len(knowledge_base)
+            st.success(f"✅ {total_docs} total documents loaded")
+            
+            if dropbox_docs:
+                st.caption(f"📦 {len(dropbox_docs)} from Dropbox")
+            if google_docs:
+                st.caption(f"🌐 {len(google_docs)} from Google Drive")
             
             if st.button("🔄 Refresh Documents", key="refresh_docs"):
+                st.cache_data.clear()
                 st.session_state.knowledge_base = []
                 st.session_state.loading_complete = False
                 st.rerun()
             
-            st.caption("📅 Auto-refreshes every 30 minutes")
+            st.caption("🔄 Auto-refreshes every 30 minutes")
             
         else:
-            st.warning("⚠️ No Dropbox documents found")
-            st.info("Check Dropbox folder and file permissions")
+            st.warning("⚠️ No documents found")
+            st.info("Check document source configurations")
         
         st.divider()
         
         # Admin panel
         with st.expander("🔒 Admin Panel"):
-            st.write("**Dropbox Integration Management**")
+            st.write("**Document Source Management**")
             
             admin_password = st.text_input("Admin Password:", type="password", key="admin_password_input")
             correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")
@@ -514,58 +618,107 @@ def show_main_app():
                 st.success("✅ Admin access granted")
                 
                 if knowledge_base:
-                    st.subheader("📄 Dropbox Documents")
-                    for idx, doc in enumerate(knowledge_base):
-                        with st.expander(f"📄 {doc['name']}"):
-                            st.write(f"**File:** {doc['name']}")
-                            st.write(f"**Source:** Dropbox")
-                            st.write(f"**Size:** {doc.get('size', 'Unknown')} bytes")
-                            st.write(f"**Modified:** {doc.get('modified', 'Unknown')}")
-                            st.write(f"**Path:** {doc.get('path', 'Unknown')}")
-                            preview_text = doc['content'][:200] + "..." if len(doc['content']) > 200 else doc['content']
-                            st.text_area("Content preview:", preview_text, height=100, disabled=True, key=f"admin_preview_{idx}")
+                    # Dropbox Documents
+                    dropbox_docs = [doc for doc in knowledge_base if doc.get('source') == 'dropbox']
+                    if dropbox_docs:
+                        st.subheader("📦 Dropbox Documents")
+                        for idx, doc in enumerate(dropbox_docs):
+                            with st.expander(f"📦 {doc['name']}"):
+                                st.write(f"**File:** {doc['name']}")
+                                st.write(f"**Source:** Dropbox")
+                                st.write(f"**Size:** {doc.get('size', 'Unknown')} bytes")
+                                st.write(f"**Modified:** {doc.get('modified', 'Unknown')}")
+                                st.write(f"**Path:** {doc.get('path', 'Unknown')}")
+                                preview_text = doc['content'][:200] + "..." if len(doc['content']) > 200 else doc['content']
+                                st.text_area("Content preview:", preview_text, height=100, disabled=True, key=f"admin_dropbox_preview_{idx}")
+                    
+                    # Google Drive Documents
+                    google_docs = [doc for doc in knowledge_base if doc.get('source') == 'google_drive']
+                    if google_docs:
+                        st.subheader("🌐 Google Drive Documents")
+                        for idx, doc in enumerate(google_docs):
+                            with st.expander(f"🌐 {doc['name']}"):
+                                st.write(f"**File:** {doc['name']}")
+                                st.write(f"**Source:** Google Drive")
+                                st.write(f"**Size:** {doc.get('size', 'Unknown')} bytes")
+                                st.write(f"**Modified:** {doc.get('modified', 'Unknown')}")
+                                st.write(f"**Type:** {doc.get('mime_type', doc.get('type', 'Unknown'))}")
+                                if doc.get('path'):
+                                    st.markdown(f"**[View in Drive]({doc['path']})**")
+                                preview_text = doc['content'][:200] + "..." if len(doc['content']) > 200 else doc['content']
+                                st.text_area("Content preview:", preview_text, height=100, disabled=True, key=f"admin_google_preview_{idx}")
                 
                 st.divider()
                 
-                st.subheader("⚙️ Dropbox Configuration Status")
+                st.subheader("⚙️ Configuration Status")
                 
                 config_items = [
                     ("DROPBOX_ACCESS_TOKEN", "Dropbox Access Token"),
-                    ("DROPBOX_FOLDER_PATH", "Dropbox Folder Path")
+                    ("DROPBOX_FOLDER_PATH", "Dropbox Folder Path"),
+                    ("Google Service Account", "Google Drive Credentials"),
+                    ("AZURE_OPENAI_API_KEY", "Azure OpenAI API Key"),
+                    ("AZURE_OPENAI_ENDPOINT", "Azure OpenAI Endpoint")
                 ]
                 
                 for env_var, description in config_items:
-                    value = os.getenv(env_var)
-                    if value:
-                        st.success(f"✅ {description}: Configured")
-                    else:
-                        if env_var == "DROPBOX_FOLDER_PATH":
-                            st.info(f"ℹ️ {description}: Using default (/MAGnus)")
+                    if env_var == "Google Service Account":
+                        if "google" in st.secrets or "google_service_account" in st.secrets:
+                            st.success(f"✅ {description}: Configured")
                         else:
                             st.error(f"❌ {description}: Missing")
+                    else:
+                        value = os.getenv(env_var) or st.secrets.get(env_var)
+                        if value:
+                            st.success(f"✅ {description}: Configured")
+                        else:
+                            if env_var == "DROPBOX_FOLDER_PATH":
+                                st.info(f"ℹ️ {description}: Using default (/MAGnus)")
+                            else:
+                                st.error(f"❌ {description}: Missing")
                 
                 st.divider()
                 
                 st.subheader("📋 Configuration Reference")
                 st.code('''
 # Add these to your Streamlit secrets:
+
+# Dropbox Configuration
 DROPBOX_ACCESS_TOKEN = "your-dropbox-access-token"
 DROPBOX_FOLDER_PATH = "/MAGnus"
 
+# Google Drive Configuration
+google_service_account = """
+{
+  "type": "service_account",
+  "project_id": "your-project-id",
+  "private_key_id": "your-private-key-id",
+  "private_key": "-----BEGIN PRIVATE KEY-----\\nyour-private-key\\n-----END PRIVATE KEY-----\\n",
+  "client_email": "your-service-account@your-project.iam.gserviceaccount.com",
+  "client_id": "your-client-id",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/your-service-account%40your-project.iam.gserviceaccount.com"
+}
+"""
+
+[drive]
+folder_name = "MAGnus Knowledge Base"
+
 # Login credentials
 LOGIN_PASSWORD = "your-secure-login-password"
+ADMIN_PASSWORD = "your-admin-password"
 
-# Azure OpenAI (existing)
+# Azure OpenAI
 AZURE_OPENAI_API_KEY = "your-key"
 AZURE_OPENAI_ENDPOINT = "your-endpoint"
 AZURE_OPENAI_DEPLOYMENT_NAME = "gpt-4.1-mini"
-ADMIN_PASSWORD = "your-admin-password"
                 ''', language="toml")
                 
             elif admin_password:
                 st.error("❌ Incorrect password")
             else:
-                st.info("🔐 Enter admin password for configuration status")
+                st.info("🔑 Enter admin password for configuration status")
         
         st.divider()
         
@@ -596,7 +749,7 @@ ADMIN_PASSWORD = "your-admin-password"
 I'm here to help! To provide you with the best assistance, please let me know what type of request this is:
 
 🤔 **Question** - I need information or guidance
-🔄 **Change** - I want to suggest an improvement or new feature  
+📄 **Change** - I want to suggest an improvement or new feature  
 ⚠️ **Issue** - Something isn't working as expected
 🔧 **Problem** - I'm experiencing a technical difficulty
 
@@ -618,6 +771,7 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
             export_data = {
                 "timestamp": datetime.now().isoformat(),
                 "knowledge_base_docs": [doc["name"] for doc in knowledge_base],
+                "knowledge_base_sources": list(set([doc.get("source", "unknown") for doc in knowledge_base])),
                 "messages": st.session_state.messages
             }
             
@@ -655,7 +809,7 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
                 response = """I'm here to help! To provide you with the best assistance, please let me know what type of request this is:
 
 🤔 **Question** - I need information or guidance
-🔄 **Change** - I want to suggest an improvement or new feature  
+📄 **Change** - I want to suggest an improvement or new feature  
 ⚠️ **Issue** - Something isn't working as expected
 🔧 **Problem** - I'm experiencing a technical difficulty
 
@@ -748,11 +902,11 @@ This form ensures your idea gets to the right people and receives proper conside
                                 placeholder = st.empty()
                                 full_response = ""
                                 
-                                # Prepare knowledge base context - BACK TO ORIGINAL
+                                # Prepare knowledge base context
                                 knowledge_context = ""
                                 if knowledge_base:
                                     knowledge_context = "\n\n".join([
-                                        f"Document: {doc['name']}\n{doc['content']}" 
+                                        f"Document: {doc['name']} (Source: {doc.get('source', 'unknown')})\n{doc['content']}" 
                                         for doc in knowledge_base
                                     ])
                                 
@@ -827,9 +981,38 @@ Your role is to be a reliable source of company-specific information only."""
 
     # Footer
     st.markdown("---")
+    
+    # Dynamic footer based on connected sources
+    footer_parts = []
+    footer_parts.append("MAGnus Knowledge Bot")
+    
+    if knowledge_base:
+        total_docs = len(knowledge_base)
+        footer_parts.append(f"{total_docs} documents")
+        
+        # Show source breakdown
+        sources = {}
+        for doc in knowledge_base:
+            source = doc.get('source', 'unknown')
+            sources[source] = sources.get(source, 0) + 1
+        
+        source_text = []
+        for source, count in sources.items():
+            if source == 'dropbox':
+                source_text.append(f"{count} Dropbox")
+            elif source == 'google_drive':
+                source_text.append(f"{count} Google Drive")
+            else:
+                source_text.append(f"{count} {source}")
+        
+        if source_text:
+            footer_parts.append(f"({', '.join(source_text)})")
+    
+    footer_parts.append("Multi-Source Integration")
+    
     st.markdown(
         "<div style='text-align: center; color: gray; font-size: 0.8em;'>"
-        f"MAGnus Knowledge Bot • {len(knowledge_base)} documents • Secured with Auto-Login"
+        f"{' • '.join(footer_parts)}"
         "</div>", 
         unsafe_allow_html=True
     )
