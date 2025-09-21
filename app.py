@@ -1,4 +1,3 @@
-
 import os
 import json
 import time
@@ -34,7 +33,7 @@ def get_google_drive_connector():
     return None
 
 # Robust text extractor: many connectors use different keys
-TEXT_KEYS = ["content","text","body","raw","document_text","preview","snippet","extracted_text"]
+TEXT_KEYS = ["content","text","body","raw","document_text","preview","snippet","extracted_text","_normalized_text"]
 
 def extract_doc_text(doc: dict) -> str:
     for k in TEXT_KEYS:
@@ -171,6 +170,7 @@ for k, v in [
     ("conversation_state", "initial"),
     ("current_category", None),
     ("last_loaded_at", None),
+    ("debug_mode", False),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -232,19 +232,46 @@ def show_loading():
 
 def show_main_app():
     st.title("🤖 MAGnus - MA Group Knowledge Bot")
-    if st.button("🚪 Logout"):
-        logout()
+    
+    # Add debug toggle
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col1:
+        if st.button("🚪 Logout"):
+            logout()
+    with col2:
+        if st.button("🔍 Toggle Debug"):
+            st.session_state.debug_mode = not st.session_state.debug_mode
+            st.rerun()
+    with col3:
+        if st.button("🔄 Smart Refresh"):
+            st.cache_data.clear()
+            st.session_state.knowledge_base = []
+            st.session_state.loading_complete = False
+            st.rerun()
 
     kb = st.session_state.knowledge_base
     docs_with_text = sum(1 for d in kb if d.get("_normalized_text"))
+    
+    # Enhanced sidebar with debug info
     st.sidebar.header("📚 Knowledge Base")
     st.sidebar.write(f"Loaded documents: {len(kb)}")
     st.sidebar.write(f"Docs with text content: {docs_with_text}")
-    if st.sidebar.button("🔄 Smart Refresh"):
-        st.cache_data.clear()
-        st.session_state.knowledge_base = []
-        st.session_state.loading_complete = False
-        st.rerun()
+    
+    if st.session_state.debug_mode:
+        st.sidebar.header("🔍 Debug Info")
+        st.sidebar.write("**Document Types:**")
+        types = {}
+        for doc in kb:
+            doc_type = doc.get('type', 'unknown')
+            types[doc_type] = types.get(doc_type, 0) + 1
+        for doc_type, count in types.items():
+            st.sidebar.write(f"- {doc_type}: {count}")
+        
+        st.sidebar.write("**Document Names:**")
+        for doc in kb[:10]:  # Show first 10
+            name = doc.get('name', 'Unknown')[:30] + "..."
+            content_len = len(doc.get('_normalized_text', ''))
+            st.sidebar.write(f"- {name} ({content_len} chars)")
 
     # Initial welcome
     if not st.session_state.messages and st.session_state.conversation_state == "initial":
@@ -330,10 +357,30 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
             return
 
         kb = st.session_state.knowledge_base
+        
+        # Debug: Show knowledge base status
+        if st.session_state.debug_mode:
+            st.write(f"🔍 Debug: Knowledge base has {len(kb)} documents")
+            st.write(f"🔍 Debug: Documents with content: {sum(1 for d in kb if d.get('_normalized_text'))}")
+        
         tokens, bigrams = tokenize_query(user_input)
+        
+        if st.session_state.debug_mode:
+            st.write(f"🔍 Debug: Query tokens: {tokens}")
+            st.write(f"🔍 Debug: Query bigrams: {bigrams}")
+        
         # Rank documents by query relevance
         scored = [(score_doc(d, tokens, bigrams), d) for d in kb]
         scored.sort(key=lambda x: x[0], reverse=True)
+        
+        if st.session_state.debug_mode:
+            st.write("🔍 Debug: Top 5 document scores:")
+            for i, (score, doc) in enumerate(scored[:5]):
+                name = doc.get('name', 'Unknown')[:50]
+                content_preview = doc.get('_normalized_text', '')[:100] + "..."
+                st.write(f"  {i+1}. Score: {score}, Doc: {name}")
+                st.write(f"     Content preview: {content_preview}")
+        
         # Keep top N docs, but also drop zeros if we have at least one positive
         positives = [d for s, d in scored if s > 0]
         selected = positives[:8] if positives else [d for s,d in scored[:6]]
@@ -360,6 +407,14 @@ Please type one of these options: **Question**, **Change**, **Issue**, or **Prob
             chunks.append(block)
             used += len(block)
         knowledge_context = "\n\n".join(chunks)
+        
+        if st.session_state.debug_mode:
+            st.write(f"🔍 Debug: Built context with {len(chunks)} document chunks")
+            st.write(f"🔍 Debug: Total context length: {len(knowledge_context)} characters")
+            if knowledge_context:
+                st.write(f"🔍 Debug: Context preview: {knowledge_context[:500]}...")
+            else:
+                st.write("🔍 Debug: ⚠️ NO CONTEXT BUILT - This is the problem!")
 
         system_message = {
             "role": "system",
