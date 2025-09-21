@@ -39,16 +39,65 @@ def display_logo():
         </div>
         """, unsafe_allow_html=True)
 
-def typing_effect(text, placeholder):
-    """Display text with typing effect"""
+def create_avatar_chip(role):
+    """Create custom avatar chip HTML"""
+    if role == "user":
+        return '<div class="avatar-chip user">You</div>'
+    else:
+        return '<div class="avatar-chip assistant">MAGnus</div>'
+
+def display_message_with_custom_avatar(role, content):
+    """Display chat message with custom avatar chip"""
+    avatar_html = create_avatar_chip(role)
+    
+    # Create a container for the message with custom avatar
+    message_class = "user-message" if role == "user" else "assistant-message"
+    
+    st.markdown(f"""
+    <div class="chat-message-container {message_class}">
+        <div class="avatar-container">
+            {avatar_html}
+        </div>
+        <div class="message-content">
+            {content}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+def typing_effect_with_avatar(text, role):
+    """Display text with typing effect and custom avatar"""
+    # First display the avatar chip
+    avatar_html = create_avatar_chip(role)
+    avatar_container = st.empty()
+    avatar_container.markdown(avatar_html, unsafe_allow_html=True)
+    
+    # Then show the typing effect
+    message_container = st.empty()
     displayed_text = ""
     for char in text:
         displayed_text += char
-        placeholder.markdown(displayed_text + '<span class="typing-indicator"></span>', unsafe_allow_html=True)
+        message_container.markdown(f"""
+        <div class="message-content">
+            {displayed_text}<span class="typing-indicator"></span>
+        </div>
+        """, unsafe_allow_html=True)
         time.sleep(0.02)  # Adjust speed here - 0.02 is quite fast
     
     # Final display without cursor
-    placeholder.markdown(displayed_text)
+    full_message = f"""
+    <div class="chat-message-container assistant-message">
+        <div class="avatar-container">
+            {avatar_html}
+        </div>
+        <div class="message-content">
+            {displayed_text}
+        </div>
+    </div>
+    """
+    
+    # Clear previous elements and show final message
+    avatar_container.empty()
+    message_container.markdown(full_message, unsafe_allow_html=True)
 
 # ---------- Dependencies ----------
 try:
@@ -311,10 +360,12 @@ I'm MAGnus, your friendly AI assistant here to help with anything work-related. 
         st.session_state.messages.append({"role": "assistant", "content": welcome})
         st.session_state.conversation_state = "show_options"
 
-    # Chat history
+    # Chat history with custom avatar chips
     for m in st.session_state.messages:
-        with st.chat_message(m["role"]):
-            st.markdown(m["content"])
+        if m["role"] == "user":
+            display_message_with_custom_avatar("user", m["content"])
+        else:
+            display_message_with_custom_avatar("assistant", m["content"])
 
     # Show option buttons after welcome
     if st.session_state.conversation_state == "show_options":
@@ -348,8 +399,7 @@ I'm MAGnus, your friendly AI assistant here to help with anything work-related. 
             "problem": "Problem - you're experiencing a technical difficulty"
         }
         
-        with st.chat_message("assistant"):
-            st.markdown(f"You've chosen **{category_text[category]}**. Is that correct?")
+        display_message_with_custom_avatar("assistant", f"You've chosen **{category_text[category]}**. Is that correct?")
         
         col1, col2 = st.columns([1, 1])
         with col1:
@@ -396,8 +446,7 @@ I'm MAGnus, your friendly AI assistant here to help with anything work-related. 
         return
 
     st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
+    display_message_with_custom_avatar("user", user_input)
 
     # Handle questions with the Azure Assistant
     if st.session_state.conversation_state == "ready_for_questions":
@@ -427,48 +476,80 @@ I'm MAGnus, your friendly AI assistant here to help with anything work-related. 
                     "content": msg["content"]
                 })
 
-        with st.chat_message("assistant"):
-            with st.spinner("Let me check our company documents for you..."):
-                # Create thread and run
-                thread_id, run_id = create_thread_and_run(
-                    client, 
-                    assistant.id, 
-                    assistant_messages
-                )
-                
-                if not thread_id or not run_id:
-                    st.error("Failed to start AI Assistant.")
-                    return
-                
-                # Store thread ID for potential follow-ups
-                st.session_state.thread_id = thread_id
-                
-                if st.session_state.debug_mode:
-                    st.write(f"🔍 Thread ID: {thread_id}")
-                    st.write(f"🔍 Run ID: {run_id}")
-                
-                # Wait for completion
-                success, run_result = wait_for_run_completion(client, thread_id, run_id)
-                
-                if not success:
-                    if run_result:
-                        st.error(f"Assistant run failed: {run_result.status}")
-                        if st.session_state.debug_mode and hasattr(run_result, 'last_error'):
-                            st.write(f"Error details: {run_result.last_error}")
-                    else:
-                        st.error("Assistant run timed out or failed.")
-                    return
-                
-                # Get the response
-                response = get_assistant_response(client, thread_id)
-                
-                if response:
-                    # Use typing effect for the response
-                    response_placeholder = st.empty()
-                    typing_effect(response, response_placeholder)
-                    st.session_state.messages.append({"role": "assistant", "content": response})
-                else:
-                    st.error("Could not retrieve assistant response.")
+        # Main loading message with custom avatar
+        loading_container = st.empty()
+        loading_container.markdown("""
+        <div class="chat-message-container assistant-message">
+            <div class="avatar-container">
+                <div class="avatar-chip assistant">MAGnus</div>
+            </div>
+            <div class="message-content">
+                Let me check our company documents for you...
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.spinner():
+            # Create thread and run
+            thread_id, run_id = create_thread_and_run(
+                client, 
+                assistant.id, 
+                assistant_messages
+            )
+            
+            if not thread_id or not run_id:
+                loading_container.markdown("""
+                <div class="chat-message-container assistant-message">
+                    <div class="avatar-container">
+                        <div class="avatar-chip assistant">MAGnus</div>
+                    </div>
+                    <div class="message-content">
+                        ❌ Failed to start AI Assistant.
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                return
+            
+            # Store thread ID for potential follow-ups
+            st.session_state.thread_id = thread_id
+            
+            # Wait for completion
+            success, run_result = wait_for_run_completion(client, thread_id, run_id)
+            
+            if not success:
+                error_msg = f"Assistant run failed: {run_result.status}" if run_result else "Assistant run timed out or failed."
+                loading_container.markdown(f"""
+                <div class="chat-message-container assistant-message">
+                    <div class="avatar-container">
+                        <div class="avatar-chip assistant">MAGnus</div>
+                    </div>
+                    <div class="message-content">
+                        ❌ {error_msg}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                return
+            
+            # Get the response
+            response = get_assistant_response(client, thread_id)
+            
+            if response:
+                # Clear loading message
+                loading_container.empty()
+                # Use typing effect for the response
+                typing_effect_with_avatar(response, "assistant")
+                st.session_state.messages.append({"role": "assistant", "content": response})
+            else:
+                loading_container.markdown("""
+                <div class="chat-message-container assistant-message">
+                    <div class="avatar-container">
+                        <div class="avatar-chip assistant">MAGnus</div>
+                    </div>
+                    <div class="message-content">
+                        ❌ Could not retrieve assistant response.
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
     # Footer
     st.markdown("---")
