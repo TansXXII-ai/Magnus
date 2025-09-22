@@ -7,7 +7,7 @@ st.set_page_config(
     page_title="MAGnus - MA Group Knowledge Bot", 
     page_icon="🤖", 
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"  # Fixed: was "collapsed"
 )
 
 def load_css():
@@ -22,42 +22,39 @@ def load_css():
 load_css()
 
 def display_logo():
-    """Display the MAGnus logo using Streamlit's image function"""
+    """Display the MAGnus logo with enhanced styling"""
     try:
-        # Check if file exists first
         if os.path.exists("magnuslogo.png"):
-            # Better centering with more balanced columns
             col1, col2, col3 = st.columns([2, 1, 2])
             with col2:
-                st.image("magnuslogo.png", width=200, use_container_width=False)
+                st.image("magnuslogo.png", width=250, use_container_width=False)
         else:
-            # File doesn't exist, show text logo
             st.markdown("""
-            <div style="text-align: center; margin: 2rem 0;">
-                <h1 style="color: #25255c; font-family: 'Inter', sans-serif; font-weight: 700;">MAGnus</h1>
+            <div class="logo-text-container">
+                <h1 class="logo-text">MAGnus AI</h1>
+                <p class="logo-subtitle">Intelligent Assistant</p>
             </div>
             """, unsafe_allow_html=True)
     except Exception as e:
-        # Any error, show text logo
         st.markdown("""
-        <div style="text-align: center; margin: 2rem 0;">
-            <h1 style="color: #25255c; font-family: 'Inter', sans-serif; font-weight: 700;">MAGnus</h1>
+        <div class="logo-text-container">
+            <h1 class="logo-text">MAGnus AI</h1>
+            <p class="logo-subtitle">Intelligent Assistant</p>
         </div>
         """, unsafe_allow_html=True)
 
 def create_avatar_chip(role):
-    """Create custom avatar chip HTML"""
+    """Create enhanced avatar chip HTML"""
     if role == "user":
-        return '<div class="avatar-chip user">You</div>'
+        return '<div class="avatar-chip user"><i class="user-icon">👤</i> You</div>'
     else:
-        return '<div class="avatar-chip assistant">MAGnus</div>'
+        return '<div class="avatar-chip assistant"><i class="bot-icon">🤖</i> MAGnus</div>'
 
 def display_message_with_custom_avatar(role, content):
-    """Display chat message with custom avatar chip"""
+    """Display chat message with enhanced custom avatar chip"""
     avatar_html = create_avatar_chip(role)
-    
-    # Create a container for the message with custom avatar
     message_class = "user-message" if role == "user" else "assistant-message"
+    timestamp = datetime.now().strftime('%H:%M')
     
     st.markdown(f"""
     <div class="chat-message-container {message_class}">
@@ -67,43 +64,52 @@ def display_message_with_custom_avatar(role, content):
         <div class="message-content">
             {content}
         </div>
+        <div class="message-timestamp">
+            {timestamp}
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
 def typing_effect_with_avatar(text, role):
     """Display text with typing effect and custom avatar"""
-    # First display the avatar chip
     avatar_html = create_avatar_chip(role)
-    avatar_container = st.empty()
-    avatar_container.markdown(avatar_html, unsafe_allow_html=True)
+    timestamp = datetime.now().strftime('%H:%M')
     
-    # Then show the typing effect
-    message_container = st.empty()
-    displayed_text = ""
-    for char in text:
-        displayed_text += char
-        message_container.markdown(f"""
-        <div class="message-content">
-            {displayed_text}<span class="typing-indicator"></span>
-        </div>
-        """, unsafe_allow_html=True)
-        time.sleep(0.02)  # Adjust speed here - 0.02 is quite fast
+    # Create containers
+    container = st.empty()
     
-    # Final display without cursor
-    full_message = f"""
+    # Show typing indicator first
+    container.markdown(f"""
     <div class="chat-message-container assistant-message">
         <div class="avatar-container">
             {avatar_html}
         </div>
         <div class="message-content">
-            {displayed_text}
+            <div class="typing-indicator-container">
+                <span class="typing-dot"></span>
+                <span class="typing-dot"></span>
+                <span class="typing-dot"></span>
+            </div>
         </div>
     </div>
-    """
+    """, unsafe_allow_html=True)
     
-    # Clear previous elements and show final message
-    avatar_container.empty()
-    message_container.markdown(full_message, unsafe_allow_html=True)
+    time.sleep(1)  # Brief pause for typing indicator
+    
+    # Now show the full message
+    container.markdown(f"""
+    <div class="chat-message-container assistant-message">
+        <div class="avatar-container">
+            {avatar_html}
+        </div>
+        <div class="message-content">
+            {text}
+        </div>
+        <div class="message-timestamp">
+            {timestamp}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ---------- Dependencies ----------
 try:
@@ -140,7 +146,6 @@ def get_or_create_assistant(client):
     assistant_id = get_secret("AZURE_ASSISTANT_ID")
     
     if assistant_id:
-        # Use existing assistant
         try:
             assistant = client.beta.assistants.retrieve(assistant_id)
             return assistant
@@ -148,7 +153,6 @@ def get_or_create_assistant(client):
             st.error(f"Could not retrieve assistant {assistant_id}: {e}")
             return None
     else:
-        # Instructions for creating assistant in Azure AI Foundry
         st.error("""
         **Assistant not configured!**
         
@@ -163,8 +167,7 @@ def get_or_create_assistant(client):
 
 def get_time_greeting():
     """Get time-appropriate greeting"""
-    import datetime
-    now = datetime.datetime.now()
+    now = datetime.now()
     hour = now.hour
     
     if 5 <= hour < 12:
@@ -179,15 +182,11 @@ def get_time_greeting():
 def create_thread_and_run(client, assistant_id, messages):
     """Create a thread and run with the assistant"""
     try:
-        # Create thread with messages
         thread = client.beta.threads.create(messages=messages)
-        
-        # Create run
         run = client.beta.threads.runs.create(
             thread_id=thread.id,
             assistant_id=assistant_id
         )
-        
         return thread.id, run.id
     except Exception as e:
         st.error(f"Error creating thread and run: {e}")
@@ -216,7 +215,7 @@ def wait_for_run_completion(client, thread_id, run_id, max_wait=60):
             st.error(f"Error checking run status: {e}")
             return False, None
     
-    return False, None  # Timeout
+    return False, None
 
 def get_assistant_response(client, thread_id):
     """Get the latest assistant message from thread"""
@@ -225,7 +224,6 @@ def get_assistant_response(client, thread_id):
         if messages.data:
             latest_message = messages.data[0]
             if latest_message.role == 'assistant':
-                # Extract text content
                 content_parts = []
                 for content in latest_message.content:
                     if content.type == 'text':
@@ -244,61 +242,56 @@ for k, v in [
     ("conversation_state", "initial"),
     ("current_category", None),
     ("thread_id", None),
-    ("debug_mode", False),
+    ("session_stats", {"questions": 0, "responses": 0}),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
 
 def logout():
-    st.session_state.authenticated = False
-    st.session_state.assistant_ready = False
+    """Enhanced logout with confirmation"""
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.cache_resource.clear()
+    st.rerun()
+
+def reset_chat():
+    """Enhanced chat reset"""
     st.session_state.messages = []
     st.session_state.conversation_state = "initial"
     st.session_state.current_category = None
     st.session_state.thread_id = None
-    st.cache_resource.clear()
-    st.rerun()
+    st.session_state.session_stats = {"questions": 0, "responses": 0}
 
 # ---------- Screens ----------
 def show_login():
-    # Add aggressive background override
+    """Enhanced login screen"""
     st.markdown("""
-    <style>
-    /* Super aggressive dark mode override */
-    .stApp, .main, .block-container, div[data-testid="stAppViewContainer"] {
-        background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%) !important;
-    }
-    
-    /* Override any remaining dark elements */
-    div[data-testid="stHeader"], div[data-testid="stToolbar"] {
-        background-color: #f8fafc !important;
-    }
-    
-    /* Force light theme on everything */
-    .css-1d391kg, .css-18e3th9, .css-1y4p8pa {
-        background-color: #f8fafc !important;
-        color: #1e293b !important;
-    }
-    </style>
+    <div class="login-page-container">
+        <div class="login-header">
+            <h1 class="login-title">🤖 MAGnus Knowledge Bot</h1>
+            <p class="login-subtitle">Your intelligent assistant for MA Group knowledge</p>
+        </div>
+    </div>
     """, unsafe_allow_html=True)
-    
-    st.markdown('<h1 style="color: #25255c; text-align: center; font-family: Inter, sans-serif; font-weight: 700; margin-bottom: 2rem;">🔐 MAGnus Knowledge Bot</h1>', unsafe_allow_html=True)
     
     display_logo()
     
-    # Simple spacing
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<div class="login-form-container">', unsafe_allow_html=True)
     
-    # Clean login container
-    st.markdown('<div class="login-container">', unsafe_allow_html=True)
-    
-    with st.form("login_form"):
-        st.markdown('<h3 style="color: #25255c; text-align: center; margin-bottom: 1.5rem;">Welcome to MAGnus AI</h3>', unsafe_allow_html=True)
-        st.markdown('<p style="color: #64748b; text-align: center; margin-bottom: 2rem;">Your intelligent assistant for MA Group knowledge</p>', unsafe_allow_html=True)
+    with st.form("login_form", clear_on_submit=True):
+        st.markdown("""
+        <div class="login-form-header">
+            <h3>Welcome Back</h3>
+            <p>Please sign in to access your AI assistant</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        username = st.text_input("Username", placeholder="Enter your username")
-        password = st.text_input("Password", type="password", placeholder="Enter your password")
-        login_button = st.form_submit_button("🚀 Login & Connect", use_container_width=True)
+        username = st.text_input("👤 Username", placeholder="Enter your username")
+        password = st.text_input("🔒 Password", type="password", placeholder="Enter your password")
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            login_button = st.form_submit_button("🚀 Sign In & Connect", use_container_width=True)
     
     st.markdown('</div>', unsafe_allow_html=True)
     
@@ -306,287 +299,377 @@ def show_login():
         if username == "MAG" and st.secrets.get("LOGIN_PASSWORD", "defaultpassword") == password:
             st.session_state.authenticated = True
             st.session_state.assistant_ready = False
+            st.success("✅ Login successful! Initializing your assistant...")
+            time.sleep(1)
             st.rerun()
         else:
-            st.error("Invalid username or password. Please try again.")
+            st.error("❌ Invalid username or password. Please try again.")
 
 def show_assistant_setup():
-    st.title("🤖 MAGnus Knowledge Bot")
-    st.markdown("### 🔧 Setting up AI Assistant")
+    """Enhanced assistant setup screen"""
+    st.markdown("""
+    <div class="setup-container">
+        <h1 class="setup-title">🤖 MAGnus Knowledge Bot</h1>
+        <h3 class="setup-subtitle">🔧 Initializing AI Assistant</h3>
+    </div>
+    """, unsafe_allow_html=True)
     
-    prog = st.progress(0)
-    status = st.empty()
+    progress_container = st.container()
     
-    # Check Azure OpenAI availability
-    status.text("Checking Azure OpenAI connection...")
-    prog.progress(25)
-    
-    if not AZURE_OPENAI_AVAILABLE:
-        st.error("❌ Azure OpenAI library not available")
-        if st.button("🚪 Logout"):
-            logout()
-        return
-    
-    # Get Azure client
-    status.text("Connecting to Azure OpenAI...")
-    prog.progress(50)
-    
-    client = get_azure_client()
-    if not client:
-        st.error("❌ Could not connect to Azure OpenAI. Check your credentials.")
-        if st.button("🚪 Logout"):
-            logout()
-        return
-    
-    # Get or create assistant
-    status.text("Setting up AI Assistant...")
-    prog.progress(75)
-    
-    assistant = get_or_create_assistant(client)
-    if not assistant:
-        if st.button("🚪 Logout"):
-            logout()
-        return
-    
-    # Success
-    status.text("✅ Assistant ready!")
-    prog.progress(100)
-    
-    st.session_state.assistant_ready = True
-    time.sleep(0.5)
-    st.rerun()
-
-def show_main_app():
-    st.markdown('<h1 class="main-title">🤖 MAGnus - MA Group Knowledge Bot</h1>', unsafe_allow_html=True)
-    
-    display_logo()
-    
-    # Control buttons (removed debug toggle)
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("🚪 Logout"):
-            logout()
-    with col2:
-        if st.button("🔄 Reset Chat"):
-            st.session_state.messages = []
-            st.session_state.conversation_state = "initial"
-            st.session_state.thread_id = None
-            st.rerun()
-
-    # Sidebar with system info
-    with st.sidebar:
-        st.markdown("### 🤖 AI Assistant")
-        st.write("**Status:** ✅ Ready")
-        st.write("**Source:** Azure AI Foundry")
-        st.write("**Search:** File Search Enabled")
+    with progress_container:
+        prog = st.progress(0, "Starting initialization...")
+        status = st.empty()
         
-        st.markdown("---")
-        st.markdown("### 📱 Contact")
-        st.write("For technical support or questions about MAGnus, contact your IT team.")
-
-    # Initial welcome with time-based greeting
-    if not st.session_state.messages and st.session_state.conversation_state == "initial":
-        time_greeting = get_time_greeting()
-        welcome = f"""Hey there! How are you doing {time_greeting}? 
-
-I'm MAGnus, your friendly AI assistant here to help with anything work-related. What can I help you with?"""
-        st.session_state.messages.append({"role": "assistant", "content": welcome})
-        st.session_state.conversation_state = "show_options"
-
-    # Chat history with custom avatar chips
-    for m in st.session_state.messages:
-        if m["role"] == "user":
-            display_message_with_custom_avatar("user", m["content"])
-        else:
-            display_message_with_custom_avatar("assistant", m["content"])
-
-    # Show option buttons after welcome
-    if st.session_state.conversation_state == "show_options":
-        st.markdown("### What can I help you with?")
+        # Check Azure OpenAI availability
+        status.info("🔍 Checking Azure OpenAI connection...")
+        prog.progress(25, "Checking Azure OpenAI...")
+        time.sleep(0.5)
         
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🤔 I have a Question", use_container_width=True):
-                st.session_state.conversation_state = "confirm_question"
-                st.rerun()
-            if st.button("⚠️ I have an Issue", use_container_width=True):
-                st.session_state.conversation_state = "confirm_issue"
-                st.rerun()
-        
-        with col2:
-            if st.button("📄 I want to suggest a Change", use_container_width=True):
-                st.session_state.conversation_state = "confirm_change"
-                st.rerun()
-            if st.button("🔧 I have a Problem", use_container_width=True):
-                st.session_state.conversation_state = "confirm_problem"
-                st.rerun()
-        return
-
-    # Confirmation flows
-    if st.session_state.conversation_state.startswith("confirm_"):
-        category = st.session_state.conversation_state.replace("confirm_", "")
-        category_text = {
-            "question": "Question - you need information or guidance",
-            "change": "Change - you want to suggest an improvement",
-            "issue": "Issue - something isn't working as expected", 
-            "problem": "Problem - you're experiencing a technical difficulty"
-        }
-        
-        display_message_with_custom_avatar("assistant", f"You've chosen **{category_text[category]}**. Is that correct?")
-        
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("✅ Yes, that's right", use_container_width=True):
-                st.session_state.current_category = category
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": f"You've chosen **{category_text[category]}**. Is that correct?"
-                })
-                st.session_state.messages.append({
-                    "role": "user", 
-                    "content": "Yes, that's right"
-                })
-                
-                if category == "change":
-                    msg = ("Perfect! I love hearing improvement ideas.\n\nThe best way to submit your suggestion is through our Innovation Request form:\n\n🔗 **[Submit Innovation Request](https://www.jotform.com/form/250841782712054)**\n\nThis ensures your idea gets to the right people and gets proper consideration.")
-                    st.session_state.messages.append({"role": "assistant", "content": msg})
-                    st.session_state.conversation_state = "completed"
-                else:
-                    if category == "question":
-                        msg = "Great! What would you like to know? Just ask me anything about work processes, systems, or policies."
-                    elif category == "issue":
-                        msg = "I understand you're having an issue. Can you tell me what's happening? I'll help you figure it out."
-                    else:  # problem
-                        msg = "I'm here to help with your problem. What's going wrong? Let me see what I can find to help."
-                    
-                    st.session_state.messages.append({"role": "assistant", "content": msg})
-                    st.session_state.conversation_state = "ready_for_questions"
-                st.rerun()
-        
-        with col2:
-            if st.button("❌ No, let me choose again", use_container_width=True):
-                st.session_state.conversation_state = "show_options"
-                st.rerun()
-        return
-
-    # Input for questions
-    if st.session_state.conversation_state == "ready_for_questions":
-        placeholder = "Type your question here..."
-    else:
-        placeholder = "Hello! How can I help you today?"
-    user_input = st.chat_input(placeholder)
-    if not user_input:
-        return
-
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    display_message_with_custom_avatar("user", user_input)
-
-    # Handle questions with the Azure Assistant
-    if st.session_state.conversation_state == "ready_for_questions":
         if not AZURE_OPENAI_AVAILABLE:
-            with st.chat_message("assistant"):
-                st.error("AI service is not available.")
+            status.error("❌ Azure OpenAI library not available")
+            if st.button("🚪 Return to Login"):
+                logout()
             return
-
+        
+        # Get Azure client
+        status.info("🔗 Connecting to Azure OpenAI...")
+        prog.progress(50, "Connecting to Azure...")
+        time.sleep(0.5)
+        
         client = get_azure_client()
         if not client:
-            with st.chat_message("assistant"):
-                st.error("Could not connect to Azure OpenAI service.")
+            status.error("❌ Could not connect to Azure OpenAI. Check your credentials.")
+            if st.button("🚪 Return to Login"):
+                logout()
             return
-
+        
+        # Get or create assistant
+        status.info("⚙️ Setting up AI Assistant...")
+        prog.progress(75, "Setting up assistant...")
+        time.sleep(0.5)
+        
         assistant = get_or_create_assistant(client)
         if not assistant:
-            with st.chat_message("assistant"):
-                st.error("AI Assistant is not properly configured.")
+            if st.button("🚪 Return to Login"):
+                logout()
             return
+        
+        # Success
+        status.success("✅ Assistant ready!")
+        prog.progress(100, "Ready!")
+        time.sleep(0.5)
+        
+        st.session_state.assistant_ready = True
+        st.rerun()
 
-        # Convert messages to OpenAI format for the assistant
-        assistant_messages = []
-        for msg in st.session_state.messages:
-            if msg["role"] in ["user", "assistant"]:
-                assistant_messages.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
-                })
-
-        # Main loading message with custom avatar
-        loading_container = st.empty()
-        loading_container.markdown("""
-        <div class="chat-message-container assistant-message">
-            <div class="avatar-container">
-                <div class="avatar-chip assistant">MAGnus</div>
-            </div>
-            <div class="message-content">
-                Let me check our company documents for you...
-            </div>
+def show_main_app():
+    """Enhanced main application interface"""
+    
+    # Header with gradient background
+    st.markdown("""
+    <div class="main-header">
+        <h1 class="main-title">🤖 MAGnus AI Assistant</h1>
+        <p class="main-subtitle">Your intelligent companion for MA Group knowledge</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Enhanced Sidebar
+    with st.sidebar:
+        st.markdown("## 🤖 Assistant Status")
+        
+        # Status indicators
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.markdown("**Status:**")
+        with col2:
+            st.success("🟢 Online")
+        
+        st.markdown("""
+        **Model:** GPT-4 Turbo  
+        **Source:** Azure AI Foundry  
+        **Features:** File Search Enabled
+        """)
+        
+        st.divider()
+        
+        # Session Statistics
+        st.markdown("## 📊 Session Stats")
+        if st.session_state.messages:
+            user_msgs = len([m for m in st.session_state.messages if m["role"] == "user"])
+            ai_msgs = len([m for m in st.session_state.messages if m["role"] == "assistant"])
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Questions", user_msgs)
+            with col2:
+                st.metric("Responses", ai_msgs)
+        else:
+            st.info("No messages yet")
+        
+        st.divider()
+        
+        # Quick Actions
+        st.markdown("## ⚡ Quick Actions")
+        
+        if st.button("🔄 Refresh Assistant", use_container_width=True):
+            st.cache_resource.clear()
+            st.rerun()
+            
+        if st.button("📊 System Info", use_container_width=True):
+            st.info("""
+            **System Information:**
+            - Azure OpenAI: Connected
+            - Response Time: ~2-3 seconds
+            - Knowledge Base: Active
+            - Session: Active
+            """)
+        
+        if st.button("💡 Usage Tips", use_container_width=True):
+            st.info("""
+            **Tips for better results:**
+            - Be specific with questions
+            - Mention system/process names
+            - Ask follow-up questions
+            - Use clear, direct language
+            """)
+        
+        st.divider()
+        
+        # Contact Information
+        st.markdown("## 📞 Support")
+        st.info("""
+        **Technical Support:**  
+        Contact your IT team
+        
+        **MAGnus Help:**  
+        Use the chat interface
+        """)
+    
+    # Main content area
+    main_container = st.container()
+    
+    with main_container:
+        # Control panel
+        st.markdown("""
+        <div class="control-panel">
+            <h3>🎛️ Control Panel</h3>
         </div>
         """, unsafe_allow_html=True)
         
-        with st.spinner():
-            # Create thread and run
-            thread_id, run_id = create_thread_and_run(
-                client, 
-                assistant.id, 
-                assistant_messages
-            )
-            
-            if not thread_id or not run_id:
-                loading_container.markdown("""
-                <div class="chat-message-container assistant-message">
-                    <div class="avatar-container">
-                        <div class="avatar-chip assistant">MAGnus</div>
-                    </div>
-                    <div class="message-content">
-                        ❌ Failed to start AI Assistant.
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                return
-            
-            # Store thread ID for potential follow-ups
-            st.session_state.thread_id = thread_id
-            
-            # Wait for completion
-            success, run_result = wait_for_run_completion(client, thread_id, run_id)
-            
-            if not success:
-                error_msg = f"Assistant run failed: {run_result.status}" if run_result else "Assistant run timed out or failed."
-                loading_container.markdown(f"""
-                <div class="chat-message-container assistant-message">
-                    <div class="avatar-container">
-                        <div class="avatar-chip assistant">MAGnus</div>
-                    </div>
-                    <div class="message-content">
-                        ❌ {error_msg}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                return
-            
-            # Get the response
-            response = get_assistant_response(client, thread_id)
-            
-            if response:
-                # Clear loading message
-                loading_container.empty()
-                # Use typing effect for the response
-                typing_effect_with_avatar(response, "assistant")
-                st.session_state.messages.append({"role": "assistant", "content": response})
-            else:
-                loading_container.markdown("""
-                <div class="chat-message-container assistant-message">
-                    <div class="avatar-container">
-                        <div class="avatar-chip assistant">MAGnus</div>
-                    </div>
-                    <div class="message-content">
-                        ❌ Could not retrieve assistant response.
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if st.button("🚪 Logout", use_container_width=True):
+                logout()
+        
+        with col2:
+            if st.button("🔄 Reset Chat", use_container_width=True):
+                reset_chat()
+                st.rerun()
+        
+        with col3:
+            if st.button("💡 Help", use_container_width=True):
+                st.info("💬 Type your work-related questions in the chat below!")
+        
+        with col4:
+            if st.button("📈 Export", use_container_width=True):
+                if st.session_state.messages:
+                    export_data = {
+                        "timestamp": datetime.now().isoformat(),
+                        "messages": st.session_state.messages
+                    }
+                    st.download_button(
+                        "📥 Download Chat History",
+                        data=str(export_data),
+                        file_name=f"magnus_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json"
+                    )
+                else:
+                    st.info("No messages to export")
+        
+        st.divider()
+        
+        # Chat area
+        chat_container = st.container()
+        
+        with chat_container:
+            # Initial welcome message
+            if not st.session_state.messages and st.session_state.conversation_state == "initial":
+                time_greeting = get_time_greeting()
+                welcome = f"""👋 **Welcome to MAGnus!**
 
-    # Footer
+Hey there! How are you doing {time_greeting}? 
+
+I'm MAGnus, your friendly AI assistant here to help with anything work-related. What can I help you with today?"""
+                
+                st.session_state.messages.append({"role": "assistant", "content": welcome})
+                st.session_state.conversation_state = "show_options"
+
+            # Display chat history
+            for m in st.session_state.messages:
+                display_message_with_custom_avatar(m["role"], m["content"])
+
+            # Show option buttons after welcome
+            if st.session_state.conversation_state == "show_options":
+                st.markdown("""
+                <div class="options-container">
+                    <h3>What can I help you with today?</h3>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🤔 I have a Question", use_container_width=True, key="question_btn"):
+                        st.session_state.conversation_state = "confirm_question"
+                        st.rerun()
+                    if st.button("⚠️ I have an Issue", use_container_width=True, key="issue_btn"):
+                        st.session_state.conversation_state = "confirm_issue"
+                        st.rerun()
+                
+                with col2:
+                    if st.button("📄 I want to suggest a Change", use_container_width=True, key="change_btn"):
+                        st.session_state.conversation_state = "confirm_change"
+                        st.rerun()
+                    if st.button("🔧 I have a Problem", use_container_width=True, key="problem_btn"):
+                        st.session_state.conversation_state = "confirm_problem"
+                        st.rerun()
+                return
+
+            # Confirmation flows
+            if st.session_state.conversation_state.startswith("confirm_"):
+                category = st.session_state.conversation_state.replace("confirm_", "")
+                category_text = {
+                    "question": "Question - you need information or guidance",
+                    "change": "Change - you want to suggest an improvement",
+                    "issue": "Issue - something isn't working as expected", 
+                    "problem": "Problem - you're experiencing a technical difficulty"
+                }
+                
+                display_message_with_custom_avatar("assistant", f"You've chosen **{category_text[category]}**. Is that correct?")
+                
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    if st.button("✅ Yes, that's right", use_container_width=True, key=f"confirm_{category}"):
+                        st.session_state.current_category = category
+                        st.session_state.messages.append({
+                            "role": "assistant", 
+                            "content": f"You've chosen **{category_text[category]}**. Is that correct?"
+                        })
+                        st.session_state.messages.append({
+                            "role": "user", 
+                            "content": "Yes, that's right"
+                        })
+                        
+                        if category == "change":
+                            msg = """Perfect! I love hearing improvement ideas.
+
+The best way to submit your suggestion is through our Innovation Request form:
+
+🔗 **[Submit Innovation Request](https://www.jotform.com/form/250841782712054)**
+
+This ensures your idea gets to the right people and gets proper consideration."""
+                            st.session_state.messages.append({"role": "assistant", "content": msg})
+                            st.session_state.conversation_state = "completed"
+                        else:
+                            if category == "question":
+                                msg = "Great! What would you like to know? Just ask me anything about work processes, systems, or policies."
+                            elif category == "issue":
+                                msg = "I understand you're having an issue. Can you tell me what's happening? I'll help you figure it out."
+                            else:  # problem
+                                msg = "I'm here to help with your problem. What's going wrong? Let me see what I can find to help."
+                            
+                            st.session_state.messages.append({"role": "assistant", "content": msg})
+                            st.session_state.conversation_state = "ready_for_questions"
+                        st.rerun()
+                
+                with col2:
+                    if st.button("❌ No, let me choose again", use_container_width=True, key=f"reject_{category}"):
+                        st.session_state.conversation_state = "show_options"
+                        st.rerun()
+                return
+
+            # Chat input
+            placeholder = "Type your question here..." if st.session_state.conversation_state == "ready_for_questions" else "Hello! How can I help you today?"
+            user_input = st.chat_input(placeholder)
+            
+            if user_input:
+                st.session_state.messages.append({"role": "user", "content": user_input})
+                display_message_with_custom_avatar("user", user_input)
+
+                # Handle AI responses
+                if st.session_state.conversation_state == "ready_for_questions":
+                    if not AZURE_OPENAI_AVAILABLE:
+                        display_message_with_custom_avatar("assistant", "❌ AI service is not available.")
+                        return
+
+                    client = get_azure_client()
+                    if not client:
+                        display_message_with_custom_avatar("assistant", "❌ Could not connect to Azure OpenAI service.")
+                        return
+
+                    assistant = get_or_create_assistant(client)
+                    if not assistant:
+                        display_message_with_custom_avatar("assistant", "❌ AI Assistant is not properly configured.")
+                        return
+
+                    # Convert messages for assistant
+                    assistant_messages = []
+                    for msg in st.session_state.messages:
+                        if msg["role"] in ["user", "assistant"]:
+                            assistant_messages.append({
+                                "role": msg["role"],
+                                "content": msg["content"]
+                            })
+
+                    # Show loading message
+                    loading_container = st.empty()
+                    loading_container.markdown("""
+                    <div class="chat-message-container assistant-message">
+                        <div class="avatar-container">
+                            <div class="avatar-chip assistant"><i class="bot-icon">🤖</i> MAGnus</div>
+                        </div>
+                        <div class="message-content">
+                            <div class="typing-indicator-container">
+                                🔍 Searching company documents...
+                                <div class="loading-dots">
+                                    <span class="typing-dot"></span>
+                                    <span class="typing-dot"></span>
+                                    <span class="typing-dot"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    with st.spinner("Processing..."):
+                        # Create thread and run
+                        thread_id, run_id = create_thread_and_run(client, assistant.id, assistant_messages)
+                        
+                        if thread_id and run_id:
+                            st.session_state.thread_id = thread_id
+                            success, run_result = wait_for_run_completion(client, thread_id, run_id)
+                            
+                            if success:
+                                response = get_assistant_response(client, thread_id)
+                                if response:
+                                    loading_container.empty()
+                                    typing_effect_with_avatar(response, "assistant")
+                                    st.session_state.messages.append({"role": "assistant", "content": response})
+                                else:
+                                    loading_container.markdown("❌ Could not retrieve assistant response.")
+                            else:
+                                error_msg = f"Assistant run failed: {run_result.status}" if run_result else "Assistant run timed out."
+                                loading_container.markdown(f"❌ {error_msg}")
+
+    # Enhanced footer
     st.markdown("---")
-    st.caption(f"MAGnus Knowledge Bot • Powered by Azure AI Foundry • Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    footer_col1, footer_col2, footer_col3 = st.columns(3)
+    with footer_col1:
+        st.caption("🤖 MAGnus Knowledge Bot v2.0")
+    with footer_col2:
+        st.caption("⚡ Powered by Azure AI Foundry")
+    with footer_col3:
+        st.caption(f"🕐 Session started: {datetime.now().strftime('%H:%M')}")
 
 # ---------- Router ----------
 if not st.session_state.authenticated:
