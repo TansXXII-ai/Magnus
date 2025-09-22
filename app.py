@@ -7,8 +7,54 @@ st.set_page_config(
     page_title="MAGnus - MA Group Knowledge Bot", 
     page_icon="🤖", 
     layout="wide",
-    initial_sidebar_state="expanded"  # Fixed: was "collapsed"
+    initial_sidebar_state="expanded"
 )
+
+# Force sidebar visibility and add debugging
+st.markdown("""
+<style>
+/* Force sidebar to be visible */
+section[data-testid="stSidebar"] {
+    display: block !important;
+    width: 21rem !important;
+    min-width: 21rem !important;
+    visibility: visible !important;
+}
+
+/* Make sidebar toggle button highly visible */
+[data-testid*="sidebar"] button,
+[data-testid*="Sidebar"] button,
+[data-testid*="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"],
+.css-1vbd788,
+.css-1d391kg button,
+.css-1kyxreq,
+.css-17eq0hr,
+.css-1dp5vir {
+    background: #272557 !important;
+    color: white !important;
+    border: 3px solid #779eb8 !important;
+    border-radius: 50% !important;
+    box-shadow: 0 4px 20px rgba(119, 158, 184, 0.6) !important;
+    width: 3rem !important;
+    height: 3rem !important;
+    position: relative !important;
+    z-index: 9999 !important;
+}
+
+/* Force visibility of sidebar toggle area */
+div[data-testid="stSidebarNav"],
+.css-1d391kg,
+.sidebar-nav {
+    background: rgba(39, 37, 87, 0.1) !important;
+    border: 2px solid #779eb8 !important;
+    min-width: 3rem !important;
+    min-height: 3rem !important;
+    position: relative !important;
+    z-index: 9999 !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 def load_css():
     """Load external CSS file"""
@@ -70,12 +116,74 @@ def display_message_with_custom_avatar(role, content):
     </div>
     """, unsafe_allow_html=True)
 
+def show_sidebar_content():
+    """Display sidebar content as a fallback"""
+    st.markdown("""
+    ### 🤖 Assistant Status
+    
+    **Status:** 🟢 Online  
+    **Model:** GPT-4 Turbo  
+    **Source:** Azure AI Foundry  
+    **Features:** File Search Enabled
+    """)
+    
+    st.divider()
+    
+    st.markdown("### 📊 Session Stats")
+    if st.session_state.messages:
+        user_msgs = len([m for m in st.session_state.messages if m["role"] == "user"])
+        ai_msgs = len([m for m in st.session_state.messages if m["role"] == "assistant"])
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Questions", user_msgs)
+        with col2:
+            st.metric("Responses", ai_msgs)
+    else:
+        st.info("No messages yet")
+    
+    st.divider()
+    
+    st.markdown("### ⚡ Quick Actions")
+    
+    if st.button("🔄 Refresh Assistant", use_container_width=True, key="sidebar_refresh"):
+        st.cache_resource.clear()
+        st.rerun()
+        
+    if st.button("📊 System Info", use_container_width=True, key="sidebar_info"):
+        st.info("""
+        **System Information:**
+        - Azure OpenAI: Connected
+        - Response Time: ~2-3 seconds
+        - Knowledge Base: Active
+        - Session: Active
+        """)
+    
+    if st.button("💡 Usage Tips", use_container_width=True, key="sidebar_tips"):
+        st.info("""
+        **Tips for better results:**
+        - Be specific with questions
+        - Mention system/process names
+        - Ask follow-up questions
+        - Use clear, direct language
+        """)
+    
+    st.divider()
+    
+    st.markdown("### 📞 Support")
+    st.info("""
+    **Technical Support:**  
+    Contact your IT team
+    
+    **MAGnus Help:**  
+    Use the chat interface
+    """)
+
 def typing_effect_with_avatar(text, role):
     """Display text with typing effect and custom avatar"""
     avatar_html = create_avatar_chip(role)
     timestamp = datetime.now().strftime('%H:%M')
     
-    # Create containers
     container = st.empty()
     
     # Show typing indicator first
@@ -94,9 +202,9 @@ def typing_effect_with_avatar(text, role):
     </div>
     """, unsafe_allow_html=True)
     
-    time.sleep(1)  # Brief pause for typing indicator
+    time.sleep(1)
     
-    # Now show the full message
+    # Show the full message
     container.markdown(f"""
     <div class="chat-message-container assistant-message">
         <div class="avatar-container">
@@ -243,6 +351,7 @@ for k, v in [
     ("current_category", None),
     ("thread_id", None),
     ("session_stats", {"questions": 0, "responses": 0}),
+    ("show_sidebar_content", False),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -276,7 +385,6 @@ def show_login():
     
     display_logo()
     
-    # Create the login form container properly
     with st.container():
         st.markdown("""
         <div class="login-form-container">
@@ -373,11 +481,23 @@ def show_main_app():
     </div>
     """, unsafe_allow_html=True)
     
-    # Enhanced Sidebar
+    # Create two main columns: sidebar content and main content
+    sidebar_col, main_col = st.columns([1, 3])
+    
+    # Sidebar Content (as fallback if sidebar not visible)
+    with sidebar_col:
+        if st.button("🔧 Show Sidebar Info", help="Click to see sidebar content", key="show_sidebar_toggle"):
+            st.session_state.show_sidebar_content = not st.session_state.show_sidebar_content
+        
+        if st.session_state.show_sidebar_content:
+            with st.container():
+                st.markdown("### 🔧 Sidebar Content")
+                show_sidebar_content()
+    
+    # Try to populate actual sidebar
     with st.sidebar:
         st.markdown("## 🤖 Assistant Status")
         
-        # Status indicators
         col1, col2 = st.columns([1, 2])
         with col1:
             st.markdown("**Status:**")
@@ -411,11 +531,11 @@ def show_main_app():
         # Quick Actions
         st.markdown("## ⚡ Quick Actions")
         
-        if st.button("🔄 Refresh Assistant", use_container_width=True):
+        if st.button("🔄 Refresh Assistant", use_container_width=True, key="sidebar_refresh_main"):
             st.cache_resource.clear()
             st.rerun()
             
-        if st.button("📊 System Info", use_container_width=True):
+        if st.button("📊 System Info", use_container_width=True, key="sidebar_info_main"):
             st.info("""
             **System Information:**
             - Azure OpenAI: Connected
@@ -424,7 +544,7 @@ def show_main_app():
             - Session: Active
             """)
         
-        if st.button("💡 Usage Tips", use_container_width=True):
+        if st.button("💡 Usage Tips", use_container_width=True, key="sidebar_tips_main"):
             st.info("""
             **Tips for better results:**
             - Be specific with questions
@@ -446,9 +566,7 @@ def show_main_app():
         """)
     
     # Main content area
-    main_container = st.container()
-    
-    with main_container:
+    with main_col:
         # Control panel
         st.markdown("""
         <div class="control-panel">
