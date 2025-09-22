@@ -466,10 +466,14 @@ def show_assistant_setup():
         st.rerun()
 
 def show_main_app():
-    """Enhanced main application interface with top bar using Streamlit components"""
+    """Enhanced main application interface with consolidated top bar"""
     
-    # Top bar using Streamlit columns instead of HTML
-    st.markdown("""
+    # Consolidated top bar with all information and controls
+    user_msgs = len([m for m in st.session_state.messages if m["role"] == "user"])
+    ai_msgs = len([m for m in st.session_state.messages if m["role"] == "assistant"])
+    
+    # Create one unified top bar
+    st.markdown(f"""
     <div style="
         background: linear-gradient(135deg, #272557 0%, #1e1f4a 100%);
         padding: 1rem 2rem;
@@ -477,62 +481,39 @@ def show_main_app():
         margin-bottom: 1.5rem;
         box-shadow: 0 4px 15px -5px rgba(39, 37, 87, 0.3);
         color: white;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
     ">
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
-            <div style="display: flex; align-items: center; gap: 1.5rem;">
-                <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600;">
-                    <div style="width: 8px; height: 8px; background: #10b981; border-radius: 50%; animation: pulse 2s infinite;"></div>
-                    <span>MAGnus Online</span>
+        <div style="display: flex; align-items: center; gap: 1.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600;">
+                <div style="width: 8px; height: 8px; background: #10b981; border-radius: 50%;"></div>
+                <span>MAGnus Online</span>
+            </div>
+            <div style="font-size: 0.85rem; opacity: 0.9;">
+                GPT-4 Turbo • Azure AI Foundry • File Search Enabled
+            </div>
+        </div>
+        
+        <div style="display: flex; align-items: center; gap: 2rem;">
+            <div style="display: flex; gap: 1.5rem; font-size: 0.9rem;">
+                <div style="text-align: center;">
+                    <div style="font-weight: 700; font-size: 1.1rem; color: #64b5f6;">{user_msgs}</div>
+                    <div style="opacity: 0.8;">Questions</div>
                 </div>
-                <div style="font-size: 0.9rem; opacity: 0.9;">
-                    GPT-4 Turbo • Azure AI Foundry • File Search Enabled
+                <div style="text-align: center;">
+                    <div style="font-weight: 700; font-size: 1.1rem; color: #64b5f6;">{ai_msgs}</div>
+                    <div style="opacity: 0.8;">Responses</div>
                 </div>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # Session stats and quick actions using Streamlit columns
-    col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 2, 2])
-    
-    with col1:
-        st.markdown("### 📊 Session Stats")
-    
-    with col2:
-        user_msgs = len([m for m in st.session_state.messages if m["role"] == "user"])
-        st.metric("Questions", user_msgs)
-    
-    with col3:
-        ai_msgs = len([m for m in st.session_state.messages if m["role"] == "assistant"])
-        st.metric("Responses", ai_msgs)
-    
-    with col4:
-        if st.button("🔄 Refresh Assistant"):
-            st.cache_resource.clear()
-            st.rerun()
-    
-    with col5:
-        if st.button("💡 Show Tips"):
-            st.info("**Tips:** Be specific • Mention system names • Ask follow-ups • Use clear language")
-    
-    st.divider()
-    
-    # Header with gradient background
-    st.markdown("""
-    <div class="main-header">
-        <h1 class="main-title">🤖 MAGnus AI Assistant</h1>
-        <p class="main-subtitle">Your intelligent companion for MA Group knowledge</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Control panel
-    st.markdown("""
-    <div class="control-panel">
-        <h3>🎛️ Control Panel</h3>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3, col4 = st.columns(4)
+    # Add action buttons below the main bar
+    col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
     
     with col1:
         if st.button("🚪 Logout", use_container_width=True):
@@ -548,6 +529,11 @@ def show_main_app():
             st.info("💬 Type your work-related questions in the chat below!")
     
     with col4:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.cache_resource.clear()
+            st.rerun()
+    
+    with col5:
         if st.button("📈 Export", use_container_width=True):
             if st.session_state.messages:
                 export_data = {
@@ -565,7 +551,15 @@ def show_main_app():
     
     st.divider()
     
-    # Chat area
+    # Header with gradient background
+    st.markdown("""
+    <div class="main-header">
+        <h1 class="main-title">🤖 MAGnus AI Assistant</h1>
+        <p class="main-subtitle">Your intelligent companion for MA Group knowledge</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Chat area (removed control panel section)
     chat_container = st.container()
     
     with chat_container:
