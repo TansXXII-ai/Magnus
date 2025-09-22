@@ -10,14 +10,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Proper sidebar CSS that doesn't overlap content and keeps toggle button visible
+# Simple, clean sidebar styling that works with Streamlit's natural behavior
 st.markdown("""
 <style>
-/* Sidebar styling */
+/* Just style the sidebar appearance, let Streamlit handle the functionality */
 section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #272557 0%, #1e1f4a 100%) !important;
-    border-right: 1px solid #779eb8 !important;
-    transition: width 0.3s ease !important;
 }
 
 section[data-testid="stSidebar"] > div {
@@ -25,90 +23,41 @@ section[data-testid="stSidebar"] > div {
     padding: 1.5rem !important;
 }
 
-/* When expanded - normal width */
-section[data-testid="stSidebar"][aria-expanded="true"] {
-    width: 18rem !important;
+/* Style the sidebar content text to be white */
+section[data-testid="stSidebar"] * {
+    color: white !important;
 }
 
-/* When collapsed - narrow but keep button visible */
-section[data-testid="stSidebar"][aria-expanded="false"] {
-    width: 3rem !important;
-    min-width: 3rem !important;
+section[data-testid="stSidebar"] .stMarkdown h2 {
+    color: #64b5f6 !important;
+    font-weight: 700 !important;
+    font-size: 1.1rem !important;
+    margin-bottom: 1rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
 }
 
-/* Hide most sidebar content when collapsed, but keep toggle area visible */
-section[data-testid="stSidebar"][aria-expanded="false"] > div > div {
-    display: none !important;
-}
-
-/* Keep the toggle button container visible */
-section[data-testid="stSidebar"][aria-expanded="false"] > div {
-    padding: 0.5rem !important;
-    display: flex !important;
-    align-items: flex-start !important;
-    justify-content: center !important;
-}
-
-/* Style the toggle button */
-button[data-testid="collapsedControl"] {
-    background: #779eb8 !important;
+section[data-testid="stSidebar"] .stButton > button {
+    background: linear-gradient(135deg, #779eb8 0%, #6a8ba5 100%) !important;
     color: white !important;
     border: none !important;
-    border-radius: 50% !important;
-    width: 2rem !important;
-    height: 2rem !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+    border-radius: 12px !important;
     transition: all 0.3s ease !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
+    font-weight: 600 !important;
+    width: 100% !important;
+    padding: 0.75rem 1rem !important;
+    margin: 0.25rem 0 !important;
+    font-family: 'Inter', sans-serif !important;
+    box-shadow: 0 4px 15px -5px rgba(0, 0, 0, 0.1) !important;
 }
 
-button[data-testid="collapsedControl"]:hover {
-    background: #272557 !important;
-    transform: scale(1.1) !important;
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background: linear-gradient(135deg, #6a8ba5 0%, #779eb8 100%) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 25px -8px rgba(119, 158, 184, 0.4) !important;
 }
 
-button[data-testid="collapsedControl"] svg {
-    color: white !important;
-    width: 1rem !important;
-    height: 1rem !important;
-}
-
-/* CRITICAL: Make main content properly adjust width when sidebar is open/closed */
-/* This targets the main content area */
-.main > .block-container {
-    transition: all 0.3s ease !important;
-    padding-left: 1rem !important;
-    padding-right: 1rem !important;
-}
-
-/* When sidebar is expanded, main content should be narrower and offset */
-.stApp > section[data-testid="stSidebar"][aria-expanded="true"] ~ .main > .block-container {
-    max-width: calc(100vw - 19rem) !important;
-    margin-left: 0 !important;
-}
-
-/* When sidebar is collapsed, main content can use almost full width */
-.stApp > section[data-testid="stSidebar"][aria-expanded="false"] ~ .main > .block-container {
-    max-width: calc(100vw - 4rem) !important;
-    margin-left: 0 !important;
-}
-
-/* Alternative targeting for main content */
-div[data-testid="stAppViewContainer"] > .main > .block-container {
-    transition: all 0.3s ease !important;
-}
-
-/* Force proper layout calculation */
-.stApp {
-    display: flex !important;
-}
-
-.main {
-    flex: 1 !important;
-    transition: all 0.3s ease !important;
-}
+/* Let Streamlit handle everything else naturally */
 </style>
 """, unsafe_allow_html=True)
 
