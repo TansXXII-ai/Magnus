@@ -24,19 +24,20 @@ load_css()
 def display_logo():
     """Display the MAGnus logo using Streamlit's image function"""
     try:
-        # Center the logo using columns
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.image("magnuslogo.png", width=150)
-    except FileNotFoundError:
-        # Fallback if logo can't be loaded
-        st.markdown("""
-        <div class="logo-container">
-            <h1 style="color: #25255c; font-family: 'Inter', sans-serif; font-weight: 700; text-align: center;">MAGnus</h1>
-        </div>
-        """, unsafe_allow_html=True)
+        # Check if file exists first
+        if os.path.exists("magnuslogo.png"):
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                st.image("magnuslogo.png", width=150)
+        else:
+            # File doesn't exist, show text logo
+            st.markdown("""
+            <div class="logo-container">
+                <h1 style="color: #25255c; font-family: 'Inter', sans-serif; font-weight: 700; text-align: center;">MAGnus</h1>
+            </div>
+            """, unsafe_allow_html=True)
     except Exception as e:
-        # Any other error
+        # Any error, show text logo
         st.markdown("""
         <div class="logo-container">
             <h1 style="color: #25255c; font-family: 'Inter', sans-serif; font-weight: 700; text-align: center;">MAGnus</h1>
