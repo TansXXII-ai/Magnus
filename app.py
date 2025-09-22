@@ -466,46 +466,56 @@ def show_assistant_setup():
         st.rerun()
 
 def show_main_app():
-    """Enhanced main application interface with top bar instead of sidebar"""
+    """Enhanced main application interface with top bar using Streamlit components"""
     
-    # Top bar with all the information that was previously in the sidebar
-    user_msgs = len([m for m in st.session_state.messages if m["role"] == "user"])
-    ai_msgs = len([m for m in st.session_state.messages if m["role"] == "assistant"])
-    
-    st.markdown(f"""
-    <div class="top-bar">
-        <div class="top-bar-section">
-            <div class="status-indicator">
-                <div class="status-dot"></div>
-                <span>MAGnus Online</span>
-            </div>
-            <div style="font-size: 0.9rem; opacity: 0.9;">
-                GPT-4 Turbo • Azure AI Foundry • File Search Enabled
-            </div>
-        </div>
-        
-        <div class="top-bar-section">
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <div class="stat-number">{user_msgs}</div>
-                    <div>Questions</div>
+    # Top bar using Streamlit columns instead of HTML
+    st.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #272557 0%, #1e1f4a 100%);
+        padding: 1rem 2rem;
+        border-radius: 15px;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 15px -5px rgba(39, 37, 87, 0.3);
+        color: white;
+    ">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+            <div style="display: flex; align-items: center; gap: 1.5rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600;">
+                    <div style="width: 8px; height: 8px; background: #10b981; border-radius: 50%; animation: pulse 2s infinite;"></div>
+                    <span>MAGnus Online</span>
                 </div>
-                <div class="stat-item">
-                    <div class="stat-number">{ai_msgs}</div>
-                    <div>Responses</div>
+                <div style="font-size: 0.9rem; opacity: 0.9;">
+                    GPT-4 Turbo • Azure AI Foundry • File Search Enabled
                 </div>
-            </div>
-        </div>
-        
-        <div class="top-bar-section">
-            <div class="quick-actions">
-                <span class="quick-action-btn" onclick="window.location.reload()">🔄 Refresh</span>
-                <span class="quick-action-btn" title="Response Time: ~2-3s • Knowledge Base: Active">📊 Info</span>
-                <span class="quick-action-btn" title="Be specific • Mention system names • Ask follow-ups">💡 Tips</span>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Session stats and quick actions using Streamlit columns
+    col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 2, 2])
+    
+    with col1:
+        st.markdown("### 📊 Session Stats")
+    
+    with col2:
+        user_msgs = len([m for m in st.session_state.messages if m["role"] == "user"])
+        st.metric("Questions", user_msgs)
+    
+    with col3:
+        ai_msgs = len([m for m in st.session_state.messages if m["role"] == "assistant"])
+        st.metric("Responses", ai_msgs)
+    
+    with col4:
+        if st.button("🔄 Refresh Assistant"):
+            st.cache_resource.clear()
+            st.rerun()
+    
+    with col5:
+        if st.button("💡 Show Tips"):
+            st.info("**Tips:** Be specific • Mention system names • Ask follow-ups • Use clear language")
+    
+    st.divider()
     
     # Header with gradient background
     st.markdown("""
