@@ -10,14 +10,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Better sidebar CSS that works properly with Streamlit's responsive design
+# Proper sidebar CSS that doesn't overlap content and keeps toggle button visible
 st.markdown("""
 <style>
-/* Sidebar styling that respects Streamlit's layout system */
+/* Sidebar styling */
 section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #272557 0%, #1e1f4a 100%) !important;
     border-right: 1px solid #779eb8 !important;
-    transition: all 0.3s ease !important;
+    transition: width 0.3s ease !important;
 }
 
 section[data-testid="stSidebar"] > div {
@@ -25,54 +25,48 @@ section[data-testid="stSidebar"] > div {
     padding: 1.5rem !important;
 }
 
-/* When sidebar is expanded - normal width */
+/* When expanded - normal width */
 section[data-testid="stSidebar"][aria-expanded="true"] {
     width: 18rem !important;
-    min-width: 18rem !important;
 }
 
-/* When sidebar is collapsed - very narrow */
+/* When collapsed - narrow but keep button visible */
 section[data-testid="stSidebar"][aria-expanded="false"] {
-    width: 4rem !important;
-    min-width: 4rem !important;
-    overflow: hidden !important;
+    width: 3rem !important;
+    min-width: 3rem !important;
 }
 
-/* Hide sidebar content when collapsed */
+/* Hide most sidebar content when collapsed, but keep toggle area visible */
+section[data-testid="stSidebar"][aria-expanded="false"] > div > div {
+    display: none !important;
+}
+
+/* Keep the toggle button container visible */
 section[data-testid="stSidebar"][aria-expanded="false"] > div {
-    opacity: 0 !important;
-    visibility: hidden !important;
-    transition: all 0.3s ease !important;
+    padding: 0.5rem !important;
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
 }
 
-/* Show sidebar content when expanded */
-section[data-testid="stSidebar"][aria-expanded="true"] > div {
-    opacity: 1 !important;
-    visibility: visible !important;
-    transition: all 0.3s ease !important;
-}
-
-/* Style the collapse/expand button */
+/* Style the toggle button */
 button[data-testid="collapsedControl"] {
     background: #779eb8 !important;
     color: white !important;
-    border: 2px solid #272557 !important;
+    border: none !important;
     border-radius: 50% !important;
-    width: 2.5rem !important;
-    height: 2.5rem !important;
-    box-shadow: 0 4px 15px rgba(119, 158, 184, 0.4) !important;
+    width: 2rem !important;
+    height: 2rem !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
     transition: all 0.3s ease !important;
-    position: absolute !important;
-    top: 1rem !important;
-    right: -1.25rem !important;
-    z-index: 1001 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
 }
 
 button[data-testid="collapsedControl"]:hover {
     background: #272557 !important;
-    border-color: #779eb8 !important;
     transform: scale(1.1) !important;
-    box-shadow: 0 6px 20px rgba(119, 158, 184, 0.6) !important;
 }
 
 button[data-testid="collapsedControl"] svg {
@@ -81,25 +75,38 @@ button[data-testid="collapsedControl"] svg {
     height: 1rem !important;
 }
 
-/* Adjust main content margin when sidebar is open */
-.main .block-container {
-    transition: margin-left 0.3s ease !important;
+/* CRITICAL: Make main content properly adjust width when sidebar is open/closed */
+/* This targets the main content area */
+.main > .block-container {
+    transition: all 0.3s ease !important;
     padding-left: 1rem !important;
     padding-right: 1rem !important;
 }
 
-/* When sidebar is expanded, give main content some breathing room */
-section[data-testid="stSidebar"][aria-expanded="true"] ~ .main .block-container {
-    margin-left: 1rem !important;
+/* When sidebar is expanded, main content should be narrower and offset */
+.stApp > section[data-testid="stSidebar"][aria-expanded="true"] ~ .main > .block-container {
+    max-width: calc(100vw - 19rem) !important;
+    margin-left: 0 !important;
 }
 
-/* When sidebar is collapsed, main content can use full width */
-section[data-testid="stSidebar"][aria-expanded="false"] ~ .main .block-container {
-    margin-left: 0.5rem !important;
+/* When sidebar is collapsed, main content can use almost full width */
+.stApp > section[data-testid="stSidebar"][aria-expanded="false"] ~ .main > .block-container {
+    max-width: calc(100vw - 4rem) !important;
+    margin-left: 0 !important;
 }
 
-/* Ensure sidebar toggle area is always accessible */
-.css-1d391kg {
+/* Alternative targeting for main content */
+div[data-testid="stAppViewContainer"] > .main > .block-container {
+    transition: all 0.3s ease !important;
+}
+
+/* Force proper layout calculation */
+.stApp {
+    display: flex !important;
+}
+
+.main {
+    flex: 1 !important;
     transition: all 0.3s ease !important;
 }
 </style>
