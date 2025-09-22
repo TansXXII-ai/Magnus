@@ -29,7 +29,7 @@ def display_logo():
             # Better centering with more balanced columns
             col1, col2, col3 = st.columns([2, 1, 2])
             with col2:
-                st.image("magnuslogo.png", width=200, use_column_width=False)
+                st.image("magnuslogo.png", width=200, use_container_width=False)
         else:
             # File doesn't exist, show text logo
             st.markdown("""
@@ -261,22 +261,41 @@ def logout():
 
 # ---------- Screens ----------
 def show_login():
-    st.markdown('<h1 class="main-title">🔐 MAGnus Knowledge Bot</h1>', unsafe_allow_html=True)
+    # Add aggressive background override
+    st.markdown("""
+    <style>
+    /* Super aggressive dark mode override */
+    .stApp, .main, .block-container, div[data-testid="stAppViewContainer"] {
+        background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%) !important;
+    }
+    
+    /* Override any remaining dark elements */
+    div[data-testid="stHeader"], div[data-testid="stToolbar"] {
+        background-color: #f8fafc !important;
+    }
+    
+    /* Force light theme on everything */
+    .css-1d391kg, .css-18e3th9, .css-1y4p8pa {
+        background-color: #f8fafc !important;
+        color: #1e293b !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<h1 style="color: #25255c; text-align: center; font-family: Inter, sans-serif; font-weight: 700; margin-bottom: 2rem;">🔐 MAGnus Knowledge Bot</h1>', unsafe_allow_html=True)
     
     display_logo()
     
-    # Creative welcome message box (using the mysterious space!)
-    st.markdown("""
-    <div class="welcome-box">
-        <h4>Welcome to MAGnus AI</h4>
-        <p>Your intelligent assistant for MA Group knowledge and processes</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Simple spacing
+    st.markdown("<br>", unsafe_allow_html=True)
     
+    # Clean login container
     st.markdown('<div class="login-container">', unsafe_allow_html=True)
     
     with st.form("login_form"):
-        st.markdown("### Sign In")
+        st.markdown('<h3 style="color: #25255c; text-align: center; margin-bottom: 1.5rem;">Welcome to MAGnus AI</h3>', unsafe_allow_html=True)
+        st.markdown('<p style="color: #64748b; text-align: center; margin-bottom: 2rem;">Your intelligent assistant for MA Group knowledge</p>', unsafe_allow_html=True)
+        
         username = st.text_input("Username", placeholder="Enter your username")
         password = st.text_input("Password", type="password", placeholder="Enter your password")
         login_button = st.form_submit_button("🚀 Login & Connect", use_container_width=True)
