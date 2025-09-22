@@ -323,11 +323,11 @@ section[data-testid="stSidebar"] hr {
 .chat-message-container.user-message {
     background: #f8fafc;
     margin-left: 3rem;
-    border-left: 4px solid var(--primary-color);
+    border-left: 4px solid var(--secondary-color);
 }
 
 .chat-message-container.user-message::before {
-    background: linear-gradient(180deg, var(--primary-color), var(--primary-dark));
+    background: linear-gradient(180deg, var(--secondary-color), var(--secondary-dark));
 }
 
 /* FIXED: Assistant messages with solid background for better readability */
