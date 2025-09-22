@@ -1,7 +1,7 @@
 /* Import Google Fonts */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
-/* Enhanced color scheme */
+/* Enhanced color scheme with better contrast */
 :root {
     --primary-color: #779eb8;
     --primary-dark: #6a8ba5;
@@ -9,9 +9,9 @@
     --secondary-dark: #1e1f4a;
     --background-light: #f8fafc;
     --background-white: #ffffff;
-    --text-dark: #1e293b;
-    --text-medium: #64748b;
-    --text-light: #94a3b8;
+    --text-dark: #1a202c;
+    --text-medium: #4a5568;
+    --text-light: #718096;
     --border-color: #e2e8f0;
     --border-light: #f1f5f9;
     --success-color: #10b981;
@@ -153,16 +153,17 @@ section[data-testid="stSidebar"] hr {
     margin: 0;
     font-size: 2.5rem;
     font-weight: 800;
-    text-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    text-shadow: 0 4px 8px rgba(0,0,0,0.3);
     position: relative;
     z-index: 1;
 }
 
 .main-subtitle {
-    color: rgba(255,255,255,0.9);
+    color: rgba(255,255,255,0.95);
     margin: 0.75rem 0 0 0;
     font-size: 1.2rem;
-    font-weight: 400;
+    font-weight: 500;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
     position: relative;
     z-index: 1;
 }
@@ -178,7 +179,7 @@ section[data-testid="stSidebar"] hr {
 }
 
 .control-panel h3 {
-    color: var(--secondary-color);
+    color: var(--text-dark);
     margin: 0 0 1rem 0;
     font-weight: 700;
     font-size: 1.1rem;
@@ -229,7 +230,7 @@ section[data-testid="stSidebar"] hr {
     left: 100%;
 }
 
-/* ============ CHAT STYLING ============ */
+/* ============ CHAT STYLING - FIXED CONTRAST ============ */
 
 /* Options container */
 .options-container {
@@ -243,13 +244,13 @@ section[data-testid="stSidebar"] hr {
 }
 
 .options-container h3 {
-    color: var(--secondary-color);
+    color: var(--text-dark);
     margin-bottom: 1.5rem;
     font-weight: 700;
     font-size: 1.3rem;
 }
 
-/* Enhanced avatar chips */
+/* FIXED: Enhanced avatar chips with better contrast */
 .avatar-chip {
     display: inline-flex;
     align-items: center;
@@ -266,26 +267,28 @@ section[data-testid="stSidebar"] hr {
     letter-spacing: 0.5px;
     margin-bottom: 0.75rem;
     box-shadow: var(--shadow-medium);
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    backdrop-filter: blur(5px);
     position: relative;
     overflow: hidden;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 
 .avatar-chip.user {
-    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+    background: linear-gradient(135deg, #5a7a8a 0%, #4a6a7a 100%);
+    border: 2px solid rgba(255, 255, 255, 0.2);
 }
 
 .avatar-chip.assistant {
     background: linear-gradient(135deg, var(--secondary-color) 0%, var(--secondary-dark) 100%);
+    border: 2px solid rgba(255, 255, 255, 0.2);
 }
 
 .avatar-chip .user-icon,
 .avatar-chip .bot-icon {
     font-size: 1rem;
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.2));
 }
 
-/* Chat message containers */
+/* FIXED: Chat message containers with better contrast */
 .chat-message-container {
     display: flex;
     flex-direction: column;
@@ -316,8 +319,9 @@ section[data-testid="stSidebar"] hr {
     box-shadow: var(--shadow-xl);
 }
 
+/* FIXED: User messages with solid background for better readability */
 .chat-message-container.user-message {
-    background: linear-gradient(135deg, #f8fafc 0%, var(--background-white) 100%);
+    background: #f8fafc;
     margin-left: 3rem;
     border-left: 4px solid var(--primary-color);
 }
@@ -326,8 +330,9 @@ section[data-testid="stSidebar"] hr {
     background: linear-gradient(180deg, var(--primary-color), var(--primary-dark));
 }
 
+/* FIXED: Assistant messages with solid background for better readability */
 .chat-message-container.assistant-message {
-    background: linear-gradient(135deg, var(--background-white) 0%, #f8fafc 100%);
+    background: var(--background-white);
     margin-right: 3rem;
     border-left: 4px solid var(--secondary-color);
 }
@@ -342,20 +347,30 @@ section[data-testid="stSidebar"] hr {
     margin-bottom: 0.75rem;
 }
 
+/* FIXED: Message content with much better contrast */
 .message-content {
     font-family: 'Inter', sans-serif;
     line-height: 1.7;
     color: var(--text-dark);
     font-size: 1rem;
     margin-bottom: 0.5rem;
+    font-weight: 500;
+    text-shadow: 0 1px 1px rgba(255,255,255,0.8);
 }
 
+/* FIXED: Message timestamp with better visibility */
 .message-timestamp {
     font-size: 0.75rem;
     color: var(--text-medium);
     text-align: right;
-    font-weight: 500;
-    opacity: 0.7;
+    font-weight: 600;
+    opacity: 0.8;
+    background: rgba(255,255,255,0.7);
+    padding: 0.25rem 0.5rem;
+    border-radius: 8px;
+    display: inline-block;
+    margin-left: auto;
+    width: fit-content;
 }
 
 /* ============ TYPING INDICATOR ============ */
@@ -363,8 +378,9 @@ section[data-testid="stSidebar"] hr {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    color: var(--text-medium);
+    color: var(--text-dark);
     font-style: italic;
+    font-weight: 500;
 }
 
 .loading-dots {
@@ -438,7 +454,7 @@ section[data-testid="stSidebar"] hr {
 }
 
 .login-form-header h3 {
-    color: var(--secondary-color);
+    color: var(--text-dark);
     font-size: 1.5rem;
     font-weight: 700;
     margin: 0 0 0.5rem 0;
@@ -484,7 +500,7 @@ section[data-testid="stSidebar"] hr {
 }
 
 .setup-title {
-    color: var(--secondary-color);
+    color: var(--text-dark);
     font-size: 2.5rem;
     font-weight: 800;
     margin: 0 0 1rem 0;
@@ -507,6 +523,8 @@ section[data-testid="stSidebar"] hr {
     font-size: 1rem !important;
     background: var(--background-white) !important;
     box-shadow: var(--shadow-small) !important;
+    color: var(--text-dark) !important;
+    font-weight: 500 !important;
 }
 
 .stTextInput > div > div > input:focus {
@@ -541,7 +559,7 @@ div[data-testid="stChatInput"]:focus-within {
     border: none !important;
     border-radius: var(--border-radius) !important;
     box-shadow: var(--shadow-medium) !important;
-    font-weight: 500 !important;
+    font-weight: 600 !important;
 }
 
 .stError {
@@ -550,7 +568,7 @@ div[data-testid="stChatInput"]:focus-within {
     border: none !important;
     border-radius: var(--border-radius) !important;
     box-shadow: var(--shadow-medium) !important;
-    font-weight: 500 !important;
+    font-weight: 600 !important;
 }
 
 .stInfo {
@@ -559,7 +577,7 @@ div[data-testid="stChatInput"]:focus-within {
     border: none !important;
     border-radius: var(--border-radius) !important;
     box-shadow: var(--shadow-medium) !important;
-    font-weight: 500 !important;
+    font-weight: 600 !important;
 }
 
 .stWarning {
@@ -568,7 +586,7 @@ div[data-testid="stChatInput"]:focus-within {
     border: none !important;
     border-radius: var(--border-radius) !important;
     box-shadow: var(--shadow-medium) !important;
-    font-weight: 500 !important;
+    font-weight: 600 !important;
 }
 
 /* ============ PROGRESS BAR STYLING ============ */
@@ -654,19 +672,6 @@ div[data-testid="metric-container"]:hover {
     
     .control-panel {
         padding: 0.75rem;
-    }
-}
-
-/* ============ DARK MODE SUPPORT ============ */
-@media (prefers-color-scheme: dark) {
-    :root {
-        --background-light: #1a202c;
-        --background-white: #2d3748;
-        --text-dark: #e2e8f0;
-        --text-medium: #a0aec0;
-        --text-light: #718096;
-        --border-color: #4a5568;
-        --border-light: #2d3748;
     }
 }
 
