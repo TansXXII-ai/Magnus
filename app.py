@@ -466,51 +466,61 @@ def show_assistant_setup():
         st.rerun()
 
 def show_main_app():
-    """Enhanced main application interface with consolidated top bar"""
+    """Enhanced main application interface with consolidated top bar using native Streamlit"""
     
-    # Consolidated top bar with all information and controls
+    # Get session stats
     user_msgs = len([m for m in st.session_state.messages if m["role"] == "user"])
     ai_msgs = len([m for m in st.session_state.messages if m["role"] == "assistant"])
     
-    # Create one unified top bar
-    st.markdown(f"""
+    # Create top bar using native Streamlit components with CSS container
+    st.markdown("""
     <div style="
         background: linear-gradient(135deg, #272557 0%, #1e1f4a 100%);
-        padding: 1rem 2rem;
+        padding: 1rem;
         border-radius: 15px;
         margin-bottom: 1.5rem;
         box-shadow: 0 4px 15px -5px rgba(39, 37, 87, 0.3);
-        color: white;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 1rem;
     ">
-        <div style="display: flex; align-items: center; gap: 1.5rem;">
-            <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600;">
-                <div style="width: 8px; height: 8px; background: #10b981; border-radius: 50%;"></div>
-                <span>MAGnus Online</span>
-            </div>
-            <div style="font-size: 0.85rem; opacity: 0.9;">
-                GPT-4 Turbo • Azure AI Foundry • File Search Enabled
-            </div>
-        </div>
-        
-        <div style="display: flex; align-items: center; gap: 2rem;">
-            <div style="display: flex; gap: 1.5rem; font-size: 0.9rem;">
-                <div style="text-align: center;">
-                    <div style="font-weight: 700; font-size: 1.1rem; color: #64b5f6;">{user_msgs}</div>
-                    <div style="opacity: 0.8;">Questions</div>
-                </div>
-                <div style="text-align: center;">
-                    <div style="font-weight: 700; font-size: 1.1rem; color: #64b5f6;">{ai_msgs}</div>
-                    <div style="opacity: 0.8;">Responses</div>
-                </div>
-            </div>
-        </div>
-    </div>
     """, unsafe_allow_html=True)
+    
+    # Use Streamlit columns inside the styled container
+    status_col, info_col, stats_col = st.columns([2, 3, 2])
+    
+    with status_col:
+        st.markdown("""
+        <div style="color: white; display: flex; align-items: center; gap: 0.5rem; font-weight: 600;">
+            <div style="width: 8px; height: 8px; background: #10b981; border-radius: 50%;"></div>
+            <span>MAGnus Online</span>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with info_col:
+        st.markdown("""
+        <div style="color: white; font-size: 0.85rem; opacity: 0.9; text-align: center;">
+            GPT-4 Turbo • Azure AI Foundry • File Search Enabled
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with stats_col:
+        # Use Streamlit's native columns for stats
+        q_col, r_col = st.columns(2)
+        with q_col:
+            st.markdown(f"""
+            <div style="color: white; text-align: center;">
+                <div style="font-weight: 700; font-size: 1.1rem; color: #64b5f6;">{user_msgs}</div>
+                <div style="opacity: 0.8; font-size: 0.8rem;">Questions</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with r_col:
+            st.markdown(f"""
+            <div style="color: white; text-align: center;">
+                <div style="font-weight: 700; font-size: 1.1rem; color: #64b5f6;">{ai_msgs}</div>
+                <div style="opacity: 0.8; font-size: 0.8rem;">Responses</div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # Close the container
+    st.markdown("</div>", unsafe_allow_html=True)
     
     # Add action buttons below the main bar
     col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
