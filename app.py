@@ -10,13 +10,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Force sidebar visibility with better CSS that works with Streamlit's responsive design
+# Better sidebar CSS that works properly with Streamlit's responsive design
 st.markdown("""
 <style>
-/* Enhanced sidebar styling that works with Streamlit's layout */
+/* Sidebar styling that respects Streamlit's layout system */
 section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #272557 0%, #1e1f4a 100%) !important;
-    border-right: none !important;
+    border-right: 1px solid #779eb8 !important;
+    transition: all 0.3s ease !important;
 }
 
 section[data-testid="stSidebar"] > div {
@@ -24,40 +25,82 @@ section[data-testid="stSidebar"] > div {
     padding: 1.5rem !important;
 }
 
-/* Ensure sidebar starts expanded */
+/* When sidebar is expanded - normal width */
 section[data-testid="stSidebar"][aria-expanded="true"] {
-    width: 21rem !important;
+    width: 18rem !important;
+    min-width: 18rem !important;
 }
 
-/* Make collapse button visible and functional */
-button[data-testid="collapsedControl"] {
-    background: #272557 !important;
-    color: white !important;
-    border: 2px solid #779eb8 !important;
-    border-radius: 50% !important;
-    width: 3rem !important;
-    height: 3rem !important;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important;
+/* When sidebar is collapsed - very narrow */
+section[data-testid="stSidebar"][aria-expanded="false"] {
+    width: 4rem !important;
+    min-width: 4rem !important;
+    overflow: hidden !important;
+}
+
+/* Hide sidebar content when collapsed */
+section[data-testid="stSidebar"][aria-expanded="false"] > div {
+    opacity: 0 !important;
+    visibility: hidden !important;
     transition: all 0.3s ease !important;
-    display: block !important;
+}
+
+/* Show sidebar content when expanded */
+section[data-testid="stSidebar"][aria-expanded="true"] > div {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transition: all 0.3s ease !important;
+}
+
+/* Style the collapse/expand button */
+button[data-testid="collapsedControl"] {
+    background: #779eb8 !important;
+    color: white !important;
+    border: 2px solid #272557 !important;
+    border-radius: 50% !important;
+    width: 2.5rem !important;
+    height: 2.5rem !important;
+    box-shadow: 0 4px 15px rgba(119, 158, 184, 0.4) !important;
+    transition: all 0.3s ease !important;
+    position: absolute !important;
+    top: 1rem !important;
+    right: -1.25rem !important;
+    z-index: 1001 !important;
 }
 
 button[data-testid="collapsedControl"]:hover {
-    background: #779eb8 !important;
+    background: #272557 !important;
+    border-color: #779eb8 !important;
     transform: scale(1.1) !important;
+    box-shadow: 0 6px 20px rgba(119, 158, 184, 0.6) !important;
 }
 
 button[data-testid="collapsedControl"] svg {
     color: white !important;
-    width: 1.5rem !important;
-    height: 1.5rem !important;
+    width: 1rem !important;
+    height: 1rem !important;
 }
 
-/* Ensure main content adjusts properly when sidebar is open/closed */
+/* Adjust main content margin when sidebar is open */
 .main .block-container {
+    transition: margin-left 0.3s ease !important;
     padding-left: 1rem !important;
     padding-right: 1rem !important;
-    max-width: none !important;
+}
+
+/* When sidebar is expanded, give main content some breathing room */
+section[data-testid="stSidebar"][aria-expanded="true"] ~ .main .block-container {
+    margin-left: 1rem !important;
+}
+
+/* When sidebar is collapsed, main content can use full width */
+section[data-testid="stSidebar"][aria-expanded="false"] ~ .main .block-container {
+    margin-left: 0.5rem !important;
+}
+
+/* Ensure sidebar toggle area is always accessible */
+.css-1d391kg {
+    transition: all 0.3s ease !important;
 }
 </style>
 """, unsafe_allow_html=True)
