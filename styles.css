@@ -189,6 +189,80 @@ button[title*="sidebar"]:hover, button[title*="Sidebar"]:hover {
     transform: scale(1.05) !important;
 }
 
+/* MORE AGGRESSIVE SIDEBAR TOGGLE STYLING */
+/* Target all possible sidebar control elements */
+[data-testid*="sidebar"] button,
+[data-testid*="Sidebar"] button,
+[data-testid*="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"],
+.css-1vbd788,
+.css-1d391kg button,
+.css-1kyxreq,
+.css-17eq0hr,
+.css-1dp5vir {
+    background: var(--secondary-color) !important;
+    color: white !important;
+    border: 3px solid var(--primary-color) !important;
+    border-radius: 50% !important;
+    box-shadow: 0 4px 20px rgba(119, 158, 184, 0.6) !important;
+    width: 3rem !important;
+    height: 3rem !important;
+    position: relative !important;
+    z-index: 9999 !important;
+}
+
+/* Hover states for sidebar toggle */
+[data-testid*="sidebar"] button:hover,
+[data-testid*="Sidebar"] button:hover,
+[data-testid*="collapsedControl"]:hover,
+[data-testid="stSidebarCollapsedControl"]:hover,
+.css-1vbd788:hover,
+.css-1d391kg button:hover,
+.css-1kyxreq:hover,
+.css-17eq0hr:hover,
+.css-1dp5vir:hover {
+    background: var(--primary-color) !important;
+    transform: scale(1.2) !important;
+    box-shadow: 0 6px 30px rgba(119, 158, 184, 0.8) !important;
+}
+
+/* Force visibility of sidebar toggle area */
+div[data-testid="stSidebarNav"],
+.css-1d391kg,
+.sidebar-nav {
+    background: rgba(255, 0, 0, 0.1) !important; /* Temporary red background to help locate */
+    border: 2px solid red !important; /* Temporary red border */
+    min-width: 3rem !important;
+    min-height: 3rem !important;
+    position: relative !important;
+    z-index: 9999 !important;
+}
+
+/* SVG icons inside sidebar toggle */
+[data-testid*="sidebar"] svg,
+[data-testid*="Sidebar"] svg,
+[data-testid*="collapsedControl"] svg,
+button[title*="sidebar"] svg,
+.css-1vbd788 svg,
+.css-1kyxreq svg,
+.css-17eq0hr svg,
+.css-1dp5vir svg {
+    color: white !important;
+    fill: white !important;
+    width: 1.5rem !important;
+    height: 1.5rem !important;
+}
+
+/* Emergency fallback - make ANY button in top-left area visible */
+.stApp > div:first-child button,
+.stApp > header button,
+.stApp > section:first-child button {
+    background: var(--secondary-color) !important;
+    color: white !important;
+    border: 2px solid var(--primary-color) !important;
+    box-shadow: var(--shadow-large) !important;
+}
+
 /* ============ MAIN CONTENT STYLING ============ */
 
 /* Header styling */
