@@ -123,6 +123,72 @@ section[data-testid="stSidebar"] hr {
     margin: 1.5rem 0 !important;
 }
 
+/* FIXED: Sidebar toggle button styling */
+button[data-testid="collapsedControl"] {
+    background: var(--secondary-color) !important;
+    color: white !important;
+    border: 2px solid var(--primary-color) !important;
+    border-radius: 50% !important;
+    width: 3rem !important;
+    height: 3rem !important;
+    box-shadow: var(--shadow-large) !important;
+    transition: var(--transition) !important;
+}
+
+button[data-testid="collapsedControl"]:hover {
+    background: var(--primary-color) !important;
+    transform: scale(1.1) !important;
+    box-shadow: var(--shadow-xl) !important;
+}
+
+button[data-testid="collapsedControl"] svg {
+    color: white !important;
+    width: 1.5rem !important;
+    height: 1.5rem !important;
+}
+
+/* Alternative selector for sidebar toggle */
+div[data-testid="stSidebarNav"] button {
+    background: var(--secondary-color) !important;
+    color: white !important;
+    border: 2px solid var(--primary-color) !important;
+    border-radius: 50% !important;
+    box-shadow: var(--shadow-medium) !important;
+}
+
+div[data-testid="stSidebarNav"] button:hover {
+    background: var(--primary-color) !important;
+    transform: scale(1.05) !important;
+}
+
+/* Additional sidebar toggle selectors */
+.css-1dp5vir, .css-1kyxreq, .css-17eq0hr {
+    background: var(--secondary-color) !important;
+    color: white !important;
+    border: 2px solid var(--primary-color) !important;
+    border-radius: 50% !important;
+    box-shadow: var(--shadow-medium) !important;
+}
+
+.css-1dp5vir:hover, .css-1kyxreq:hover, .css-17eq0hr:hover {
+    background: var(--primary-color) !important;
+    transform: scale(1.05) !important;
+}
+
+/* Catch-all for any sidebar control buttons */
+button[title*="sidebar"], button[title*="Sidebar"] {
+    background: var(--secondary-color) !important;
+    color: white !important;
+    border: 2px solid var(--primary-color) !important;
+    border-radius: 50% !important;
+    box-shadow: var(--shadow-medium) !important;
+}
+
+button[title*="sidebar"]:hover, button[title*="Sidebar"]:hover {
+    background: var(--primary-color) !important;
+    transform: scale(1.05) !important;
+}
+
 /* ============ MAIN CONTENT STYLING ============ */
 
 /* Header styling */
@@ -323,11 +389,11 @@ section[data-testid="stSidebar"] hr {
 .chat-message-container.user-message {
     background: #f8fafc;
     margin-left: 3rem;
-    border-left: 4px solid var(--primary-color);
+    border-left: 4px solid var(--secondary-color);
 }
 
 .chat-message-container.user-message::before {
-    background: linear-gradient(180deg, var(--primary-color), var(--primary-dark));
+    background: linear-gradient(180deg, var(--secondary-color), var(--secondary-dark));
 }
 
 /* FIXED: Assistant messages with solid background for better readability */
