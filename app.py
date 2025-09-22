@@ -466,61 +466,62 @@ def show_assistant_setup():
         st.rerun()
 
 def show_main_app():
-    """Enhanced main application interface with consolidated top bar using native Streamlit"""
+    """Enhanced main application interface using pure Streamlit components"""
     
     # Get session stats
     user_msgs = len([m for m in st.session_state.messages if m["role"] == "user"])
     ai_msgs = len([m for m in st.session_state.messages if m["role"] == "assistant"])
     
-    # Create top bar using native Streamlit components with CSS container
+    # Create top bar using pure Streamlit with targeted CSS
     st.markdown("""
-    <div style="
-        background: linear-gradient(135deg, #272557 0%, #1e1f4a 100%);
-        padding: 1rem;
-        border-radius: 15px;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 4px 15px -5px rgba(39, 37, 87, 0.3);
-    ">
+    <style>
+    .top-status-bar {
+        background: linear-gradient(135deg, #272557 0%, #1e1f4a 100%) !important;
+        padding: 1rem !important;
+        border-radius: 15px !important;
+        margin-bottom: 1.5rem !important;
+        box-shadow: 0 4px 15px -5px rgba(39, 37, 87, 0.3) !important;
+    }
+    .top-status-bar .stMarkdown {
+        color: white !important;
+    }
+    .top-status-bar .stMetric {
+        background: rgba(255,255,255,0.1) !important;
+        padding: 0.5rem !important;
+        border-radius: 8px !important;
+        text-align: center !important;
+    }
+    .top-status-bar .stMetric label {
+        color: white !important;
+        font-size: 0.8rem !important;
+    }
+    .top-status-bar .stMetric div[data-testid="metric-container"] > div {
+        color: #64b5f6 !important;
+        font-weight: 700 !important;
+    }
+    </style>
     """, unsafe_allow_html=True)
     
-    # Use Streamlit columns inside the styled container
-    status_col, info_col, stats_col = st.columns([2, 3, 2])
+    # Create container with CSS class
+    st.markdown('<div class="top-status-bar">', unsafe_allow_html=True)
+    
+    # Use Streamlit columns for layout
+    status_col, info_col, stats_col1, stats_col2 = st.columns([2, 4, 1, 1])
     
     with status_col:
-        st.markdown("""
-        <div style="color: white; display: flex; align-items: center; gap: 0.5rem; font-weight: 600;">
-            <div style="width: 8px; height: 8px; background: #10b981; border-radius: 50%;"></div>
-            <span>MAGnus Online</span>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("🟢 **MAGnus Online**")
     
     with info_col:
-        st.markdown("""
-        <div style="color: white; font-size: 0.85rem; opacity: 0.9; text-align: center;">
-            GPT-4 Turbo • Azure AI Foundry • File Search Enabled
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("GPT-4 Turbo • Azure AI Foundry • File Search Enabled")
     
-    with stats_col:
-        # Use Streamlit's native columns for stats
-        q_col, r_col = st.columns(2)
-        with q_col:
-            st.markdown(f"""
-            <div style="color: white; text-align: center;">
-                <div style="font-weight: 700; font-size: 1.1rem; color: #64b5f6;">{user_msgs}</div>
-                <div style="opacity: 0.8; font-size: 0.8rem;">Questions</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with r_col:
-            st.markdown(f"""
-            <div style="color: white; text-align: center;">
-                <div style="font-weight: 700; font-size: 1.1rem; color: #64b5f6;">{ai_msgs}</div>
-                <div style="opacity: 0.8; font-size: 0.8rem;">Responses</div>
-            </div>
-            """, unsafe_allow_html=True)
+    with stats_col1:
+        st.metric("Questions", user_msgs)
     
-    # Close the container
-    st.markdown("</div>", unsafe_allow_html=True)
+    with stats_col2:
+        st.metric("Responses", ai_msgs)
+    
+    # Close container
+    st.markdown('</div>', unsafe_allow_html=True)
     
     # Add action buttons below the main bar
     col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
