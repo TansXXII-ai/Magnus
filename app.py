@@ -10,54 +10,108 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Simple, clean sidebar styling that works with Streamlit's natural behavior
+# Remove all sidebar CSS - we're switching to a top bar approach
 st.markdown("""
 <style>
-/* Just style the sidebar appearance, let Streamlit handle the functionality */
+/* Hide the sidebar completely */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #272557 0%, #1e1f4a 100%) !important;
+    display: none !important;
 }
 
-section[data-testid="stSidebar"] > div {
-    background: linear-gradient(180deg, #272557 0%, #1e1f4a 100%) !important;
-    padding: 1.5rem !important;
+/* Top bar styling */
+.top-bar {
+    background: linear-gradient(135deg, #272557 0%, #1e1f4a 100%);
+    padding: 1rem 2rem;
+    border-radius: 15px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 4px 15px -5px rgba(39, 37, 87, 0.3);
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
 }
 
-/* Style the sidebar content text to be white */
-section[data-testid="stSidebar"] * {
-    color: white !important;
+.top-bar-section {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
 }
 
-section[data-testid="stSidebar"] .stMarkdown h2 {
-    color: #64b5f6 !important;
-    font-weight: 700 !important;
-    font-size: 1.1rem !important;
-    margin-bottom: 1rem !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.5px !important;
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
 }
 
-section[data-testid="stSidebar"] .stButton > button {
-    background: linear-gradient(135deg, #779eb8 0%, #6a8ba5 100%) !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 12px !important;
-    transition: all 0.3s ease !important;
-    font-weight: 600 !important;
-    width: 100% !important;
-    padding: 0.75rem 1rem !important;
-    margin: 0.25rem 0 !important;
-    font-family: 'Inter', sans-serif !important;
-    box-shadow: 0 4px 15px -5px rgba(0, 0, 0, 0.1) !important;
+.status-dot {
+    width: 8px;
+    height: 8px;
+    background: #10b981;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
 }
 
-section[data-testid="stSidebar"] .stButton > button:hover {
-    background: linear-gradient(135deg, #6a8ba5 0%, #779eb8 100%) !important;
-    transform: translateY(-2px) !important;
-    box-shadow: 0 8px 25px -8px rgba(119, 158, 184, 0.4) !important;
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
 }
 
-/* Let Streamlit handle everything else naturally */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    min-width: 120px;
+}
+
+.stat-item {
+    text-align: center;
+    font-size: 0.85rem;
+}
+
+.stat-number {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: #64b5f6;
+}
+
+.quick-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.quick-action-btn {
+    background: rgba(119, 158, 184, 0.2);
+    color: white;
+    border: 1px solid rgba(119, 158, 184, 0.4);
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.quick-action-btn:hover {
+    background: rgba(119, 158, 184, 0.4);
+    transform: translateY(-1px);
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .top-bar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .top-bar-section {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -412,78 +466,46 @@ def show_assistant_setup():
         st.rerun()
 
 def show_main_app():
-    """Enhanced main application interface"""
+    """Enhanced main application interface with top bar instead of sidebar"""
     
-    # Populate the sidebar first
-    with st.sidebar:
-        st.markdown("## 🤖 Assistant Status")
+    # Top bar with all the information that was previously in the sidebar
+    user_msgs = len([m for m in st.session_state.messages if m["role"] == "user"])
+    ai_msgs = len([m for m in st.session_state.messages if m["role"] == "assistant"])
+    
+    st.markdown(f"""
+    <div class="top-bar">
+        <div class="top-bar-section">
+            <div class="status-indicator">
+                <div class="status-dot"></div>
+                <span>MAGnus Online</span>
+            </div>
+            <div style="font-size: 0.9rem; opacity: 0.9;">
+                GPT-4 Turbo • Azure AI Foundry • File Search Enabled
+            </div>
+        </div>
         
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.markdown("**Status:**")
-        with col2:
-            st.success("🟢 Online")
+        <div class="top-bar-section">
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-number">{user_msgs}</div>
+                    <div>Questions</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">{ai_msgs}</div>
+                    <div>Responses</div>
+                </div>
+            </div>
+        </div>
         
-        st.markdown("""
-        **Model:** GPT-4 Turbo  
-        **Source:** Azure AI Foundry  
-        **Features:** File Search Enabled
-        """)
-        
-        st.divider()
-        
-        # Session Statistics
-        st.markdown("## 📊 Session Stats")
-        if st.session_state.messages:
-            user_msgs = len([m for m in st.session_state.messages if m["role"] == "user"])
-            ai_msgs = len([m for m in st.session_state.messages if m["role"] == "assistant"])
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Questions", user_msgs)
-            with col2:
-                st.metric("Responses", ai_msgs)
-        else:
-            st.info("No messages yet")
-        
-        st.divider()
-        
-        # Quick Actions
-        st.markdown("## ⚡ Quick Actions")
-        
-        if st.button("🔄 Refresh Assistant", use_container_width=True):
-            st.cache_resource.clear()
-            st.rerun()
-            
-        if st.button("📊 System Info", use_container_width=True):
-            st.info("""
-            **System Information:**
-            - Azure OpenAI: Connected
-            - Response Time: ~2-3 seconds
-            - Knowledge Base: Active
-            - Session: Active
-            """)
-        
-        if st.button("💡 Usage Tips", use_container_width=True):
-            st.info("""
-            **Tips for better results:**
-            - Be specific with questions
-            - Mention system/process names
-            - Ask follow-up questions
-            - Use clear, direct language
-            """)
-        
-        st.divider()
-        
-        # Contact Information
-        st.markdown("## 📞 Support")
-        st.info("""
-        **Technical Support:**  
-        Contact your IT team
-        
-        **MAGnus Help:**  
-        Use the chat interface
-        """)
+        <div class="top-bar-section">
+            <div class="quick-actions">
+                <span class="quick-action-btn" onclick="window.location.reload()">🔄 Refresh</span>
+                <span class="quick-action-btn" title="Response Time: ~2-3s • Knowledge Base: Active">📊 Info</span>
+                <span class="quick-action-btn" title="Be specific • Mention system names • Ask follow-ups">💡 Tips</span>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Header with gradient background
     st.markdown("""
