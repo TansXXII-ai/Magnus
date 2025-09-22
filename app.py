@@ -276,24 +276,24 @@ def show_login():
     
     display_logo()
     
-    st.markdown('<div class="login-form-container">', unsafe_allow_html=True)
-    
-    with st.form("login_form", clear_on_submit=True):
+    # Create the login form container properly
+    with st.container():
         st.markdown("""
-        <div class="login-form-header">
-            <h3>Welcome Back</h3>
-            <p>Please sign in to access your AI assistant</p>
+        <div class="login-form-container">
+            <div class="login-form-header">
+                <h3>Welcome Back</h3>
+                <p>Please sign in to access your AI assistant</p>
+            </div>
         </div>
         """, unsafe_allow_html=True)
         
-        username = st.text_input("👤 Username", placeholder="Enter your username")
-        password = st.text_input("🔒 Password", type="password", placeholder="Enter your password")
-        
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            login_button = st.form_submit_button("🚀 Sign In & Connect", use_container_width=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+        with st.form("login_form", clear_on_submit=True):
+            username = st.text_input("👤 Username", placeholder="Enter your username")
+            password = st.text_input("🔒 Password", type="password", placeholder="Enter your password")
+            
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                login_button = st.form_submit_button("🚀 Sign In & Connect", use_container_width=True)
     
     if login_button:
         if username == "MAG" and st.secrets.get("LOGIN_PASSWORD", "defaultpassword") == password:
