@@ -10,49 +10,54 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Force sidebar visibility with stronger CSS
+# Force sidebar visibility with better CSS that works with Streamlit's responsive design
 st.markdown("""
 <style>
-/* AGGRESSIVE sidebar positioning fix */
+/* Enhanced sidebar styling that works with Streamlit's layout */
 section[data-testid="stSidebar"] {
-    display: block !important;
-    visibility: visible !important;
-    width: 21rem !important;
-    min-width: 21rem !important;
-    max-width: 21rem !important;
-    left: 0 !important;
-    transform: translateX(0) !important;
-    position: fixed !important;
-    top: 0 !important;
-    height: 100vh !important;
-    z-index: 1000 !important;
     background: linear-gradient(180deg, #272557 0%, #1e1f4a 100%) !important;
+    border-right: none !important;
 }
 
 section[data-testid="stSidebar"] > div {
     background: linear-gradient(180deg, #272557 0%, #1e1f4a 100%) !important;
     padding: 1.5rem !important;
-    width: 100% !important;
-    height: 100% !important;
-    overflow-y: auto !important;
 }
 
-/* Ensure main content doesn't overlap sidebar */
-.main .block-container {
-    margin-left: 22rem !important;
-    max-width: calc(100% - 22rem) !important;
-}
-
-/* Force sidebar to be always visible */
-section[data-testid="stSidebar"][aria-expanded="false"] {
+/* Ensure sidebar starts expanded */
+section[data-testid="stSidebar"][aria-expanded="true"] {
     width: 21rem !important;
-    margin-left: 0 !important;
-    transform: translateX(0) !important;
 }
 
-/* Hide any collapse controls that might interfere */
+/* Make collapse button visible and functional */
 button[data-testid="collapsedControl"] {
-    display: none !important;
+    background: #272557 !important;
+    color: white !important;
+    border: 2px solid #779eb8 !important;
+    border-radius: 50% !important;
+    width: 3rem !important;
+    height: 3rem !important;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important;
+    transition: all 0.3s ease !important;
+    display: block !important;
+}
+
+button[data-testid="collapsedControl"]:hover {
+    background: #779eb8 !important;
+    transform: scale(1.1) !important;
+}
+
+button[data-testid="collapsedControl"] svg {
+    color: white !important;
+    width: 1.5rem !important;
+    height: 1.5rem !important;
+}
+
+/* Ensure main content adjusts properly when sidebar is open/closed */
+.main .block-container {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    max-width: none !important;
 }
 </style>
 """, unsafe_allow_html=True)
