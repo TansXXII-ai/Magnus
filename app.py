@@ -26,21 +26,22 @@ def display_logo():
     try:
         # Check if file exists first
         if os.path.exists("magnuslogo.png"):
-            col1, col2, col3 = st.columns([1, 2, 1])
+            # Better centering with more balanced columns
+            col1, col2, col3 = st.columns([2, 1, 2])
             with col2:
-                st.image("magnuslogo.png", width=150)
+                st.image("magnuslogo.png", width=200, use_column_width=False)
         else:
             # File doesn't exist, show text logo
             st.markdown("""
-            <div class="logo-container">
-                <h1 style="color: #25255c; font-family: 'Inter', sans-serif; font-weight: 700; text-align: center;">MAGnus</h1>
+            <div style="text-align: center; margin: 2rem 0;">
+                <h1 style="color: #25255c; font-family: 'Inter', sans-serif; font-weight: 700;">MAGnus</h1>
             </div>
             """, unsafe_allow_html=True)
     except Exception as e:
         # Any error, show text logo
         st.markdown("""
-        <div class="logo-container">
-            <h1 style="color: #25255c; font-family: 'Inter', sans-serif; font-weight: 700; text-align: center;">MAGnus</h1>
+        <div style="text-align: center; margin: 2rem 0;">
+            <h1 style="color: #25255c; font-family: 'Inter', sans-serif; font-weight: 700;">MAGnus</h1>
         </div>
         """, unsafe_allow_html=True)
 
@@ -264,10 +265,18 @@ def show_login():
     
     display_logo()
     
+    # Creative welcome message box (using the mysterious space!)
+    st.markdown("""
+    <div class="welcome-box">
+        <h4>Welcome to MAGnus AI</h4>
+        <p>Your intelligent assistant for MA Group knowledge and processes</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
     st.markdown('<div class="login-container">', unsafe_allow_html=True)
     
     with st.form("login_form"):
-        st.markdown("### Welcome Back!")
+        st.markdown("### Sign In")
         username = st.text_input("Username", placeholder="Enter your username")
         password = st.text_input("Password", type="password", placeholder="Enter your password")
         login_button = st.form_submit_button("🚀 Login & Connect", use_container_width=True)
