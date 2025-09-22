@@ -351,7 +351,6 @@ for k, v in [
     ("current_category", None),
     ("thread_id", None),
     ("session_stats", {"questions": 0, "responses": 0}),
-    ("show_sidebar_content", False),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
