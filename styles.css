@@ -514,6 +514,35 @@ button[title*="sidebar"] svg,
     font-weight: 500;
 }
 
+/* Keep chat input anchored below the latest reply */
+div[data-testid="stChatInput"] {
+    position: sticky;
+    bottom: 0;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.95), rgba(255, 255, 255, 0.95));
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--border-color);
+    z-index: 10;
+}
+
+div[data-testid="stChatInput"] textarea {
+    border-radius: 12px !important;
+    border: 1px solid var(--border-color) !important;
+    box-shadow: var(--shadow-medium) !important;
+    padding: 1rem !important;
+    font-size: 1rem !important;
+    min-height: 64px !important;
+}
+
+div[data-testid="stChatInput"] button {
+    border-radius: 10px !important;
+    background: linear-gradient(135deg, var(--secondary-color), var(--secondary-dark)) !important;
+    color: white !important;
+    font-weight: 600 !important;
+    box-shadow: var(--shadow-medium) !important;
+}
+
 .avatar-container {
     display: flex;
     justify-content: flex-start;
