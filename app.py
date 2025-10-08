@@ -672,17 +672,9 @@ I'm MAGnus, your friendly AI assistant here to help with anything work-related. 
         for m in st.session_state.messages:
             display_message_with_custom_avatar(m["role"], m["content"])
 
-        last_message_role = (
-            st.session_state.messages[-1]["role"]
-            if st.session_state.messages
-            else None
-        )
-
         if (
             st.session_state.follow_up_prompt
-            and last_message_role == "assistant"
-            and st.session_state.conversation_state
-            in {"ready_for_questions", "completed"}
+            and st.session_state.conversation_state == "ready_for_questions"
         ):
             st.markdown("""
             <div class="follow-up-card">
@@ -759,7 +751,6 @@ The best way to submit your suggestion is through our Innovation Request form:
 
 This ensures your idea gets to the right people and gets proper consideration."""
                         st.session_state.messages.append({"role": "assistant", "content": msg})
-                        st.session_state.follow_up_prompt = True
                         st.session_state.conversation_state = "completed"
                     else:
                         if category == "question":
