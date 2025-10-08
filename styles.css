@@ -503,6 +503,17 @@ button[title*="sidebar"] svg,
     background: linear-gradient(180deg, var(--secondary-color), var(--secondary-dark));
 }
 
+.follow-up-card {
+    background: rgba(103, 126, 217, 0.08);
+    border: 1px solid rgba(103, 126, 217, 0.2);
+    border-radius: 14px;
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+    box-shadow: 0 12px 30px -15px rgba(39, 37, 87, 0.35);
+    color: var(--secondary-dark);
+    font-weight: 500;
+}
+
 .avatar-container {
     display: flex;
     justify-content: flex-start;

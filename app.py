@@ -1,7 +1,9 @@
 import os
+import re
 import time
 import streamlit as st
 from datetime import datetime
+from html import escape
 
 st.set_page_config(
     page_title="MAGnus - MA Group Knowledge Bot", 
@@ -155,19 +157,68 @@ def create_avatar_chip(role):
     else:
         return '<div class="avatar-chip assistant"><i class="bot-icon">🤖</i> MAGnus</div>'
 
+def format_message_content(text):
+    """Convert lightweight Markdown to HTML for display"""
+    if not text:
+        return ""
+
+    safe_text = escape(text)
+    safe_text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe_text)
+    safe_text = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", safe_text)
+    safe_text = re.sub(r"`(.+?)`", r"<code>\1</code>", safe_text)
+
+    lines = safe_text.split("\n")
+    html_parts = []
+    buffer = []
+    in_list = False
+
+    def flush_buffer():
+        nonlocal buffer
+        if buffer:
+            html_parts.append(f"<p>{'<br>'.join(buffer)}</p>")
+            buffer = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("- "):
+            flush_buffer()
+            if not in_list:
+                html_parts.append("<ul>")
+                in_list = True
+            html_parts.append(f"<li>{stripped[2:].strip()}</li>")
+        elif stripped == "":
+            flush_buffer()
+            if in_list:
+                html_parts.append("</ul>")
+                in_list = False
+        else:
+            if in_list:
+                html_parts.append("</ul>")
+                in_list = False
+            buffer.append(stripped)
+
+    flush_buffer()
+    if in_list:
+        html_parts.append("</ul>")
+
+    return "".join(html_parts) or "<p></p>"
+
+
 def display_message_with_custom_avatar(role, content):
     """Display chat message with enhanced custom avatar chip"""
     avatar_html = create_avatar_chip(role)
     message_class = "user-message" if role == "user" else "assistant-message"
     timestamp = datetime.now().strftime('%H:%M')
-    
+    formatted_content = format_message_content(content)
+
     st.markdown(f"""
     <div class="chat-message-container {message_class}">
         <div class="avatar-container">
             {avatar_html}
         </div>
         <div class="message-content">
-            {content}
+            {formatted_content}
         </div>
         <div class="message-timestamp">
             {timestamp}
@@ -198,16 +249,36 @@ def typing_effect_with_avatar(text, role):
     </div>
     """, unsafe_allow_html=True)
     
-    time.sleep(1)
-    
-    # Show the full message
+    time.sleep(0.5)
+
+    displayed_text = ""
+    typing_delay = max(0.005, min(0.03, 0.6 / max(len(text), 1)))
+    for char in text:
+        displayed_text += char
+        formatted_content = format_message_content(displayed_text)
+        container.markdown(f"""
+        <div class="chat-message-container assistant-message">
+            <div class="avatar-container">
+                {avatar_html}
+            </div>
+            <div class="message-content">
+                {formatted_content}
+            </div>
+            <div class="message-timestamp">
+                {timestamp}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        time.sleep(typing_delay)
+
+    formatted_content = format_message_content(text)
     container.markdown(f"""
     <div class="chat-message-container assistant-message">
         <div class="avatar-container">
             {avatar_html}
         </div>
         <div class="message-content">
-            {text}
+            {formatted_content}
         </div>
         <div class="message-timestamp">
             {timestamp}
@@ -347,6 +418,9 @@ for k, v in [
     ("current_category", None),
     ("thread_id", None),
     ("session_stats", {"questions": 0, "responses": 0}),
+    ("show_help_panel", False),
+    ("show_export_panel", False),
+    ("follow_up_prompt", False),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -365,6 +439,9 @@ def reset_chat():
     st.session_state.current_category = None
     st.session_state.thread_id = None
     st.session_state.session_stats = {"questions": 0, "responses": 0}
+    st.session_state.follow_up_prompt = False
+    st.session_state.show_help_panel = False
+    st.session_state.show_export_panel = False
 
 # ---------- Screens ----------
 def show_login():
@@ -536,16 +613,20 @@ def show_main_app():
             st.rerun()
     
     with col3:
-        if st.button("💡 Help", use_container_width=True):
+        if st.button("💡 Help", use_container_width=True, key="toggle_help"):
+            st.session_state.show_help_panel = not st.session_state.show_help_panel
+        if st.session_state.show_help_panel:
             st.info("💬 Type your work-related questions in the chat below!")
-    
+
     with col4:
         if st.button("🔄 Refresh", use_container_width=True):
             st.cache_resource.clear()
             st.rerun()
-    
+
     with col5:
-        if st.button("📈 Export", use_container_width=True):
+        if st.button("📈 Export", use_container_width=True, key="toggle_export"):
+            st.session_state.show_export_panel = not st.session_state.show_export_panel
+        if st.session_state.show_export_panel:
             if st.session_state.messages:
                 export_data = {
                     "timestamp": datetime.now().isoformat(),
@@ -555,7 +636,8 @@ def show_main_app():
                     "📥 Download Chat History",
                     data=str(export_data),
                     file_name=f"magnus_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json"
+                    mime="application/json",
+                    key="download_history"
                 )
             else:
                 st.info("No messages to export")
@@ -589,6 +671,25 @@ I'm MAGnus, your friendly AI assistant here to help with anything work-related. 
         # Display chat history
         for m in st.session_state.messages:
             display_message_with_custom_avatar(m["role"], m["content"])
+
+        if (
+            st.session_state.follow_up_prompt
+            and st.session_state.conversation_state == "ready_for_questions"
+        ):
+            st.markdown("""
+            <div class="follow-up-card">
+                <strong>Has this answered your question?</strong><br>
+                You can ask a follow-up below or reset the chat to start again.
+            </div>
+            """, unsafe_allow_html=True)
+
+            follow_col1, follow_col2 = st.columns([3, 1])
+            with follow_col1:
+                st.caption("Type another question in the chat box to keep the conversation going.")
+            with follow_col2:
+                if st.button("🔄 Reset chat", use_container_width=True, key="followup_reset"):
+                    reset_chat()
+                    st.rerun()
 
         # Show option buttons after welcome
         if st.session_state.conversation_state == "show_options":
@@ -672,8 +773,9 @@ This ensures your idea gets to the right people and gets proper consideration.""
         # Chat input
         placeholder = "Type your question here..." if st.session_state.conversation_state == "ready_for_questions" else "Hello! How can I help you today?"
         user_input = st.chat_input(placeholder)
-        
+
         if user_input:
+            st.session_state.follow_up_prompt = False
             st.session_state.messages.append({"role": "user", "content": user_input})
             display_message_with_custom_avatar("user", user_input)
 
@@ -736,6 +838,7 @@ This ensures your idea gets to the right people and gets proper consideration.""
                                 loading_container.empty()
                                 typing_effect_with_avatar(response, "assistant")
                                 st.session_state.messages.append({"role": "assistant", "content": response})
+                                st.session_state.follow_up_prompt = True
                             else:
                                 loading_container.markdown("❌ Could not retrieve assistant response.")
                         else:
