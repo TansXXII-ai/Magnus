@@ -1,7 +1,10 @@
 import os
+import re
 import time
 import streamlit as st
 from datetime import datetime
+from html import escape
+from streamlit.components.v1 import html
 
 st.set_page_config(
     page_title="MAGnus - MA Group Knowledge Bot", 
@@ -155,19 +158,68 @@ def create_avatar_chip(role):
     else:
         return '<div class="avatar-chip assistant"><i class="bot-icon">🤖</i> MAGnus</div>'
 
+def format_message_content(text):
+    """Convert lightweight Markdown to HTML for display"""
+    if not text:
+        return ""
+
+    safe_text = escape(text)
+    safe_text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe_text)
+    safe_text = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", safe_text)
+    safe_text = re.sub(r"`(.+?)`", r"<code>\1</code>", safe_text)
+
+    lines = safe_text.split("\n")
+    html_parts = []
+    buffer = []
+    in_list = False
+
+    def flush_buffer():
+        nonlocal buffer
+        if buffer:
+            html_parts.append(f"<p>{'<br>'.join(buffer)}</p>")
+            buffer = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("- "):
+            flush_buffer()
+            if not in_list:
+                html_parts.append("<ul>")
+                in_list = True
+            html_parts.append(f"<li>{stripped[2:].strip()}</li>")
+        elif stripped == "":
+            flush_buffer()
+            if in_list:
+                html_parts.append("</ul>")
+                in_list = False
+        else:
+            if in_list:
+                html_parts.append("</ul>")
+                in_list = False
+            buffer.append(stripped)
+
+    flush_buffer()
+    if in_list:
+        html_parts.append("</ul>")
+
+    return "".join(html_parts) or "<p></p>"
+
+
 def display_message_with_custom_avatar(role, content):
     """Display chat message with enhanced custom avatar chip"""
     avatar_html = create_avatar_chip(role)
     message_class = "user-message" if role == "user" else "assistant-message"
     timestamp = datetime.now().strftime('%H:%M')
-    
+    formatted_content = format_message_content(content)
+
     st.markdown(f"""
     <div class="chat-message-container {message_class}">
         <div class="avatar-container">
             {avatar_html}
         </div>
         <div class="message-content">
-            {content}
+            {formatted_content}
         </div>
         <div class="message-timestamp">
             {timestamp}
@@ -198,16 +250,36 @@ def typing_effect_with_avatar(text, role):
     </div>
     """, unsafe_allow_html=True)
     
-    time.sleep(1)
-    
-    # Show the full message
+    time.sleep(0.5)
+
+    displayed_text = ""
+    typing_delay = max(0.005, min(0.03, 0.6 / max(len(text), 1)))
+    for char in text:
+        displayed_text += char
+        formatted_content = format_message_content(displayed_text)
+        container.markdown(f"""
+        <div class="chat-message-container assistant-message">
+            <div class="avatar-container">
+                {avatar_html}
+            </div>
+            <div class="message-content">
+                {formatted_content}
+            </div>
+            <div class="message-timestamp">
+                {timestamp}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        time.sleep(typing_delay)
+
+    formatted_content = format_message_content(text)
     container.markdown(f"""
     <div class="chat-message-container assistant-message">
         <div class="avatar-container">
             {avatar_html}
         </div>
         <div class="message-content">
-            {text}
+            {formatted_content}
         </div>
         <div class="message-timestamp">
             {timestamp}
@@ -347,9 +419,18 @@ for k, v in [
     ("current_category", None),
     ("thread_id", None),
     ("session_stats", {"questions": 0, "responses": 0}),
+    ("show_help_panel", False),
+    ("show_export_panel", False),
+    ("follow_up_prompt", False),
+    ("scroll_to_latest", False),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
+
+def append_message(role, content):
+    """Store a chat message and flag the UI to scroll to the latest entry"""
+    st.session_state.messages.append({"role": role, "content": content})
+    st.session_state.scroll_to_latest = True
 
 def logout():
     """Enhanced logout with confirmation"""
@@ -365,6 +446,10 @@ def reset_chat():
     st.session_state.current_category = None
     st.session_state.thread_id = None
     st.session_state.session_stats = {"questions": 0, "responses": 0}
+    st.session_state.follow_up_prompt = False
+    st.session_state.show_help_panel = False
+    st.session_state.show_export_panel = False
+    st.session_state.scroll_to_latest = False
 
 # ---------- Screens ----------
 def show_login():
@@ -536,16 +621,20 @@ def show_main_app():
             st.rerun()
     
     with col3:
-        if st.button("💡 Help", use_container_width=True):
+        if st.button("💡 Help", use_container_width=True, key="toggle_help"):
+            st.session_state.show_help_panel = not st.session_state.show_help_panel
+        if st.session_state.show_help_panel:
             st.info("💬 Type your work-related questions in the chat below!")
-    
+
     with col4:
         if st.button("🔄 Refresh", use_container_width=True):
             st.cache_resource.clear()
             st.rerun()
-    
+
     with col5:
-        if st.button("📈 Export", use_container_width=True):
+        if st.button("📈 Export", use_container_width=True, key="toggle_export"):
+            st.session_state.show_export_panel = not st.session_state.show_export_panel
+        if st.session_state.show_export_panel:
             if st.session_state.messages:
                 export_data = {
                     "timestamp": datetime.now().isoformat(),
@@ -555,7 +644,8 @@ def show_main_app():
                     "📥 Download Chat History",
                     data=str(export_data),
                     file_name=f"magnus_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json"
+                    mime="application/json",
+                    key="download_history"
                 )
             else:
                 st.info("No messages to export")
@@ -583,7 +673,7 @@ Hey there! How are you doing {time_greeting}?
 
 I'm MAGnus, your friendly AI assistant here to help with anything work-related. What can I help you with today?"""
             
-            st.session_state.messages.append({"role": "assistant", "content": welcome})
+            append_message("assistant", welcome)
             st.session_state.conversation_state = "show_options"
 
         # Display chat history
@@ -602,17 +692,21 @@ I'm MAGnus, your friendly AI assistant here to help with anything work-related. 
             with col1:
                 if st.button("🤔 I have a Question", use_container_width=True, key="question_btn"):
                     st.session_state.conversation_state = "confirm_question"
+                    st.session_state.scroll_to_latest = True
                     st.rerun()
                 if st.button("⚠️ I have an Issue", use_container_width=True, key="issue_btn"):
                     st.session_state.conversation_state = "confirm_issue"
+                    st.session_state.scroll_to_latest = True
                     st.rerun()
-            
+
             with col2:
                 if st.button("📄 I want to suggest a Change", use_container_width=True, key="change_btn"):
                     st.session_state.conversation_state = "confirm_change"
+                    st.session_state.scroll_to_latest = True
                     st.rerun()
                 if st.button("🔧 I have a Problem", use_container_width=True, key="problem_btn"):
                     st.session_state.conversation_state = "confirm_problem"
+                    st.session_state.scroll_to_latest = True
                     st.rerun()
             return
 
@@ -626,21 +720,15 @@ I'm MAGnus, your friendly AI assistant here to help with anything work-related. 
                 "problem": "Problem - you're experiencing a technical difficulty"
             }
             
-            display_message_with_custom_avatar("assistant", f"You've chosen **{category_text[category]}**. Is that correct?")
+            display_message_with_custom_avatar("assistant", f"You've chosen {category_text[category]}. Is that correct?")
             
             col1, col2 = st.columns([1, 1])
             with col1:
                 if st.button("✅ Yes, that's right", use_container_width=True, key=f"confirm_{category}"):
                     st.session_state.current_category = category
-                    st.session_state.messages.append({
-                        "role": "assistant", 
-                        "content": f"You've chosen **{category_text[category]}**. Is that correct?"
-                    })
-                    st.session_state.messages.append({
-                        "role": "user", 
-                        "content": "Yes, that's right"
-                    })
-                    
+                    append_message("assistant", f"You've chosen {category_text[category]}. Is that correct?")
+                    append_message("user", "Yes, that's right")
+
                     if category == "change":
                         msg = """Perfect! I love hearing improvement ideas.
 
@@ -649,7 +737,7 @@ The best way to submit your suggestion is through our Innovation Request form:
 🔗 **[Submit Innovation Request](https://www.jotform.com/form/250841782712054)**
 
 This ensures your idea gets to the right people and gets proper consideration."""
-                        st.session_state.messages.append({"role": "assistant", "content": msg})
+                        append_message("assistant", msg)
                         st.session_state.conversation_state = "completed"
                     else:
                         if category == "question":
@@ -658,8 +746,8 @@ This ensures your idea gets to the right people and gets proper consideration.""
                             msg = "I understand you're having an issue. Can you tell me what's happening? I'll help you figure it out."
                         else:  # problem
                             msg = "I'm here to help with your problem. What's going wrong? Let me see what I can find to help."
-                        
-                        st.session_state.messages.append({"role": "assistant", "content": msg})
+
+                        append_message("assistant", msg)
                         st.session_state.conversation_state = "ready_for_questions"
                     st.rerun()
             
@@ -672,9 +760,10 @@ This ensures your idea gets to the right people and gets proper consideration.""
         # Chat input
         placeholder = "Type your question here..." if st.session_state.conversation_state == "ready_for_questions" else "Hello! How can I help you today?"
         user_input = st.chat_input(placeholder)
-        
+
         if user_input:
-            st.session_state.messages.append({"role": "user", "content": user_input})
+            st.session_state.follow_up_prompt = False
+            append_message("user", user_input)
             display_message_with_custom_avatar("user", user_input)
 
             # Handle AI responses
@@ -725,7 +814,7 @@ This ensures your idea gets to the right people and gets proper consideration.""
                 with st.spinner("Processing..."):
                     # Create thread and run
                     thread_id, run_id = create_thread_and_run(client, assistant.id, assistant_messages)
-                    
+
                     if thread_id and run_id:
                         st.session_state.thread_id = thread_id
                         success, run_result = wait_for_run_completion(client, thread_id, run_id)
@@ -735,12 +824,48 @@ This ensures your idea gets to the right people and gets proper consideration.""
                             if response:
                                 loading_container.empty()
                                 typing_effect_with_avatar(response, "assistant")
-                                st.session_state.messages.append({"role": "assistant", "content": response})
+                                append_message("assistant", response)
+                                st.session_state.follow_up_prompt = True
                             else:
                                 loading_container.markdown("❌ Could not retrieve assistant response.")
                         else:
                             error_msg = f"Assistant run failed: {run_result.status}" if run_result else "Assistant run timed out."
                             loading_container.markdown(f"❌ {error_msg}")
+
+        if (
+            st.session_state.follow_up_prompt
+            and st.session_state.conversation_state == "ready_for_questions"
+        ):
+            st.markdown("""
+            <div class="follow-up-card">
+                <strong>Has this answered your question?</strong><br>
+                You can ask a follow-up below or reset the chat to start again.
+            </div>
+            """, unsafe_allow_html=True)
+
+            follow_col1, follow_col2 = st.columns([3, 1])
+            with follow_col1:
+                st.caption("Type another question in the chat box to keep the conversation going.")
+            with follow_col2:
+                if st.button("🔄 Reset chat", use_container_width=True, key="followup_reset"):
+                    reset_chat()
+                    st.rerun()
+
+        st.markdown('<div id="chat-bottom-anchor"></div>', unsafe_allow_html=True)
+
+    if st.session_state.scroll_to_latest:
+        html(
+            """
+            <script>
+            const anchor = window.parent.document.querySelector('#chat-bottom-anchor');
+            if (anchor) {
+                anchor.scrollIntoView({ behavior: 'smooth', block: 'end' });
+            }
+            </script>
+            """,
+            height=0,
+        )
+        st.session_state.scroll_to_latest = False
 
     # Enhanced footer
     st.markdown("---")
