@@ -843,14 +843,14 @@ This ensures your idea gets to the right people and gets proper consideration.""
         ):
             st.markdown("""
             <div class="follow-up-card">
-                <strong>Need anything else?</strong><br>
-                Ask a follow-up question in the box below or reset the chat to start fresh.
+                <strong>Has this answered your question?</strong><br>
+                You can ask a follow-up below or reset the chat to start again.
             </div>
             """, unsafe_allow_html=True)
 
             follow_col1, follow_col2 = st.columns([3, 1])
             with follow_col1:
-                st.caption("I'm ready for another question whenever you are.")
+                st.caption("Type another question in the chat box to keep the conversation going.")
             with follow_col2:
                 if st.button("🔄 Reset chat", use_container_width=True, key="followup_reset"):
                     reset_chat()
