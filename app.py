@@ -863,11 +863,16 @@ This ensures your idea gets to the right people and gets proper consideration.""
             """
             <script>
             const parentWindow = window.parent;
-            if (parentWindow && parentWindow.document && parentWindow.document.body) {
-                parentWindow.scrollTo({
-                    top: parentWindow.document.body.scrollHeight,
-                    behavior: 'smooth'
-                });
+            if (parentWindow && parentWindow.document) {
+                const anchor = parentWindow.document.getElementById('chat-bottom-anchor');
+                if (anchor && anchor.scrollIntoView) {
+                    anchor.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                } else if (parentWindow.document.body) {
+                    parentWindow.scrollTo({
+                        top: parentWindow.document.body.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                }
             }
             </script>
             """,
