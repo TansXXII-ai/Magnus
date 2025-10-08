@@ -823,8 +823,13 @@ This ensures your idea gets to the right people and gets proper consideration.""
                             response = get_assistant_response(client, thread_id)
                             if response:
                                 loading_container.empty()
-                                typing_effect_with_avatar(response, "assistant")
-                                append_message("assistant", response)
+                                follow_up_line = (
+                                    "Has this answered your question? You can ask a follow-up below "
+                                    "or reset the chat if you need to start again."
+                                )
+                                enhanced_response = f"{response.strip()}\n\n{follow_up_line}"
+                                typing_effect_with_avatar(enhanced_response, "assistant")
+                                append_message("assistant", enhanced_response)
                                 st.session_state.follow_up_prompt = True
                             else:
                                 loading_container.markdown("❌ Could not retrieve assistant response.")
@@ -838,14 +843,14 @@ This ensures your idea gets to the right people and gets proper consideration.""
         ):
             st.markdown("""
             <div class="follow-up-card">
-                <strong>Has this answered your question?</strong><br>
-                You can ask a follow-up below or reset the chat to start again.
+                <strong>Need anything else?</strong><br>
+                Ask a follow-up question in the box below or reset the chat to start fresh.
             </div>
             """, unsafe_allow_html=True)
 
             follow_col1, follow_col2 = st.columns([3, 1])
             with follow_col1:
-                st.caption("Type another question in the chat box to keep the conversation going.")
+                st.caption("I'm ready for another question whenever you are.")
             with follow_col2:
                 if st.button("🔄 Reset chat", use_container_width=True, key="followup_reset"):
                     reset_chat()
@@ -857,9 +862,12 @@ This ensures your idea gets to the right people and gets proper consideration.""
         html(
             """
             <script>
-            const anchor = window.parent.document.querySelector('#chat-bottom-anchor');
-            if (anchor) {
-                anchor.scrollIntoView({ behavior: 'smooth', block: 'end' });
+            const parentWindow = window.parent;
+            if (parentWindow && parentWindow.document && parentWindow.document.body) {
+                parentWindow.scrollTo({
+                    top: parentWindow.document.body.scrollHeight,
+                    behavior: 'smooth'
+                });
             }
             </script>
             """,
